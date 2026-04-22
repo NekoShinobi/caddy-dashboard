@@ -1,0 +1,17 @@
+
+services:
+  caddy-dashboard:
+    build: .
+    volumes:
+      - /var/log/caddy/access.log:/config/access.log:ro
+      - caddy-dashboard-data:/data
+    restart: unless-stopped
+    ports:
+      - 9080:9080
+    environment:
+      - PORT=9080
+      - LOG_PATH=/config/access.log
+      - DATA_DIR=/data
+
+volumes:
+  caddy-dashboard-data:

@@ -1,0 +1,20 @@
+import tailwindcss from '@tailwindcss/vite';
+import { sveltekit } from '@sveltejs/kit/vite';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+	plugins: [tailwindcss(), sveltekit()],
+	server: {
+		proxy: {
+			'/api': {
+				target: 'http://localhost:9080',
+				changeOrigin: true,
+				configure: (proxy) => {
+					proxy.on('proxyRes', (_proxyRes, _req, res) => {
+						res.setHeader('Cache-Control', 'no-store');
+					});
+				}
+			}
+		}
+	}
+});

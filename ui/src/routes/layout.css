@@ -1,0 +1,7 @@
+@import 'tailwindcss';
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--font-family-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+	--font-family-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
