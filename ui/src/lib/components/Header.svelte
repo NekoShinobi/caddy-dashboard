@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { theme } from '$lib/theme.svelte';
+	import { anonymize } from '$lib/anonymize.svelte';
 	import ThemePicker from './ThemePicker.svelte';
 
 	const links = [
@@ -26,6 +27,18 @@
 		{/each}
 		<div class="ml-auto flex items-center gap-3">
 			<ThemePicker />
+			<button
+				onclick={anonymize.toggle}
+				aria-label="Toggle anonymize mode"
+				title={anonymize.on ? 'Anonymize on' : 'Anonymize off'}
+				class="rounded-lg border p-2 transition-colors {anonymize.on
+					? 'border-amber-400 bg-amber-100 text-amber-600 dark:border-amber-500/60 dark:bg-amber-500/20 dark:text-amber-400'
+					: 'border-neutral-200 text-neutral-500 hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/10'}"
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+				</svg>
+			</button>
 		<button
 			onclick={theme.toggle}
 			class="rounded-lg border border-neutral-200 p-2 text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/10"

@@ -86,7 +86,7 @@
 		<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">{error}</div>
 	{/if}
 
-	<div class="overflow-hidden rounded-lg border border-neutral-200 dark:border-white/10">
+	<div class="isolate overflow-hidden rounded-lg border border-neutral-200 dark:border-white/10">
 		<div bind:this={mapEl} class="h-[500px] w-full"></div>
 	</div>
 

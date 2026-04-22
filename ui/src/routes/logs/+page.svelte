@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { anonymize, anonIP, anonHost } from '$lib/anonymize.svelte';
+	import { colorTheme } from '$lib/color-theme.svelte';
+	import { theme } from '$lib/theme.svelte';
 
 	interface RequestInfo {
 		remote_ip: string;
@@ -79,10 +82,11 @@
 	}
 
 	function statusColor(code: number): string {
-		if (code < 300) return 'text-green-600 dark:text-green-400';
-		if (code < 400) return 'text-blue-600 dark:text-blue-400';
-		if (code < 500) return 'text-yellow-600 dark:text-yellow-400';
-		return 'text-red-600 dark:text-red-400';
+		const c = colorTheme.theme[theme.dark ? 'dark' : 'light'];
+		if (code < 300) return c.green;
+		if (code < 400) return c.blue;
+		if (code < 500) return c.yellow;
+		return c.red;
 	}
 
 	function formatTs(ts: number): string {
@@ -167,13 +171,13 @@
 					{#each data.entries as entry}
 						<tr class="border-b border-neutral-100 hover:bg-neutral-50 dark:border-white/5 dark:hover:bg-white/5">
 							<td class="px-4 py-2 font-mono text-neutral-500 dark:text-white/60">{formatTs(entry.ts)}</td>
-							<td class="px-4 py-2 font-mono font-semibold {statusColor(entry.status)}">{entry.status}</td>
+							<td class="px-4 py-2 font-mono font-semibold" style="color: {statusColor(entry.status)}">{entry.status}</td>
 							<td class="px-4 py-2 font-mono text-neutral-700 dark:text-white/80">{entry.request.method}</td>
-							<td class="px-4 py-2 font-mono text-neutral-600 dark:text-white/70">{entry.request.host}</td>
+							<td class="px-4 py-2 font-mono text-neutral-600 dark:text-white/70">{anonymize.on ? anonHost(entry.request.host) : entry.request.host}</td>
 							<td class="max-w-xs truncate px-4 py-2 font-mono text-neutral-600 dark:text-white/70">{entry.request.uri}</td>
 							<td class="px-4 py-2 font-mono text-neutral-500 dark:text-white/60">{formatDuration(entry.duration)}</td>
 							<td class="px-4 py-2 font-mono text-neutral-500 dark:text-white/60">{entry.size}</td>
-							<td class="px-4 py-2 font-mono text-neutral-400 dark:text-white/50">{entry.request.client_ip}</td>
+							<td class="px-4 py-2 font-mono text-neutral-400 dark:text-white/50">{anonymize.on ? anonIP(entry.request.client_ip) : entry.request.client_ip}</td>
 						</tr>
 					{/each}
 				</tbody>

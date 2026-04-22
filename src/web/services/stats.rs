@@ -20,6 +20,7 @@ struct Stats {
     top_ips: Vec<(String, usize)>,
     avg_duration_ms: f64,
     total_bytes: u64,
+    unique_clients: usize,
     slowest_paths: Vec<SlowPath>,
 }
 
@@ -35,6 +36,7 @@ async fn get_stats(db: web::Data<Database>) -> HttpResponse {
     let mut path_durations: HashMap<String, Vec<f64>> = HashMap::new();
     let mut total_duration = 0.0f64;
     let mut total_bytes = 0u64;
+    let mut client_set: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for e in &entries {
         *status_codes.entry(e.status).or_insert(0) += 1;
@@ -43,6 +45,7 @@ async fn get_stats(db: web::Data<Database>) -> HttpResponse {
         path_durations.entry(path_key).or_default().push(e.duration * 1000.0);
         *hosts.entry(e.request.host.clone()).or_insert(0) += 1;
         *ips.entry(e.request.client_ip.clone()).or_insert(0) += 1;
+        client_set.insert(e.request.client_ip.clone());
         total_duration += e.duration;
         total_bytes += e.size;
     }
@@ -77,6 +80,7 @@ async fn get_stats(db: web::Data<Database>) -> HttpResponse {
         top_ips: sort_top(ips, 10),
         avg_duration_ms: if total > 0 { total_duration / total as f64 * 1000.0 } else { 0.0 },
         total_bytes,
+        unique_clients: client_set.len(),
         slowest_paths,
     })
 }

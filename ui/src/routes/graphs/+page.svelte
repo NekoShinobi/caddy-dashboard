@@ -34,7 +34,7 @@
 		avg_size: number;
 		median_size: number;
 		p99_size: number;
-		unique_hosts: number;
+		unique_clients: number;
 	}
 
 	let canvasRequests = $state<HTMLCanvasElement | null>(null);
@@ -177,7 +177,7 @@
 			data: {
 				labels,
 				datasets: [
-					{ label: 'Unique Hosts', data: buckets.map((b) => b.unique_hosts),
+					{ label: 'Unique Clients', data: buckets.map((b) => b.unique_clients),
 					  backgroundColor: c.blue + '80', borderColor: c.blue, borderWidth: 1 }
 				]
 			},
@@ -243,7 +243,7 @@
 		{ label: 'Requests', ref: 'canvasRequests' },
 		{ label: 'Duration (ms)', ref: 'canvasDuration' },
 		{ label: 'Response Size (bytes)', ref: 'canvasSize' },
-		{ label: 'Unique Hosts', ref: 'canvasHosts' }
+		{ label: 'Unique Clients', ref: 'canvasHosts' }
 	] as chart, i}
 		<div class="rounded-lg border border-neutral-200 bg-neutral-100 p-6 dark:border-white/10 dark:bg-white/5" class:hidden={loading}>
 			<h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-white/50">{chart.label}</h2>

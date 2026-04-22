@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { anonymize, anonIP, anonHost, anonPathKey } from '$lib/anonymize.svelte';
+	import { colorTheme } from '$lib/color-theme.svelte';
+	import { theme } from '$lib/theme.svelte';
 
 	interface SlowPath {
 		path: string;
@@ -16,6 +19,7 @@
 		top_ips: [string, number][];
 		avg_duration_ms: number;
 		total_bytes: number;
+		unique_clients: number;
 		slowest_paths: SlowPath[];
 	}
 
@@ -37,12 +41,13 @@
 		}
 	}
 
-	function statusColor(code: string): string {
+	function statusColor(code: string | number): string {
 		const n = Number(code);
-		if (n < 300) return 'text-green-600 dark:text-green-400';
-		if (n < 400) return 'text-blue-600 dark:text-blue-400';
-		if (n < 500) return 'text-yellow-600 dark:text-yellow-400';
-		return 'text-red-600 dark:text-red-400';
+		const c = colorTheme.theme[theme.dark ? 'dark' : 'light'];
+		if (n < 300) return c.green;
+		if (n < 400) return c.blue;
+		if (n < 500) return c.yellow;
+		return c.red;
 	}
 
 	function formatBytes(bytes: number): string {
@@ -97,8 +102,8 @@
 				<p class="mt-2 text-3xl font-bold">{formatBytes(stats.total_bytes)}</p>
 			</div>
 			<div class="rounded-lg border border-neutral-200 bg-neutral-100 p-6 dark:border-white/10 dark:bg-white/5">
-				<p class="text-xs uppercase tracking-wide text-neutral-500 dark:text-white/50">Unique Hosts</p>
-				<p class="mt-2 text-3xl font-bold">{stats.top_hosts.length}</p>
+				<p class="text-xs uppercase tracking-wide text-neutral-500 dark:text-white/50">Unique Clients</p>
+				<p class="mt-2 text-3xl font-bold">{stats.unique_clients.toLocaleString()}</p>
 			</div>
 		</div>
 
@@ -108,7 +113,7 @@
 				<ul class="space-y-2">
 					{#each Object.entries(stats.status_codes).sort((a, b) => Number(a[0]) - Number(b[0])) as [code, count]}
 						<li class="flex items-center justify-between">
-							<span class="font-mono text-sm {statusColor(code)}">{code}</span>
+							<span class="font-mono text-sm" style="color: {statusColor(code)}">{code}</span>
 							<span class="text-sm text-neutral-600 dark:text-white/70">{count.toLocaleString()}</span>
 						</li>
 					{/each}
@@ -120,7 +125,7 @@
 				<ul class="space-y-2">
 					{#each stats.top_hosts as [host, count]}
 						<li class="flex items-center justify-between gap-4">
-							<span class="truncate font-mono text-sm text-neutral-700 dark:text-white/70">{host}</span>
+							<span class="truncate font-mono text-sm text-neutral-700 dark:text-white/70">{anonymize.on ? anonHost(host) : host}</span>
 							<span class="shrink-0 text-sm text-neutral-600 dark:text-white/70">{count.toLocaleString()}</span>
 						</li>
 					{/each}
@@ -132,7 +137,7 @@
 				<ul class="space-y-2">
 					{#each stats.top_ips as [ip, count]}
 						<li class="flex items-center justify-between gap-4">
-							<span class="font-mono text-sm text-neutral-700 dark:text-white/70">{ip}</span>
+							<span class="font-mono text-sm text-neutral-700 dark:text-white/70">{anonymize.on ? anonIP(ip) : ip}</span>
 							<span class="shrink-0 text-sm text-neutral-600 dark:text-white/70">{count.toLocaleString()}</span>
 						</li>
 					{/each}
@@ -145,7 +150,7 @@
 			<ul class="space-y-2">
 				{#each stats.top_paths as [path, count]}
 					<li class="flex items-center justify-between gap-4">
-						<span class="truncate font-mono text-sm text-neutral-700 dark:text-white/70">{path}</span>
+						<span class="truncate font-mono text-sm text-neutral-700 dark:text-white/70">{anonymize.on ? anonPathKey(path) : path}</span>
 						<span class="shrink-0 text-sm text-neutral-600 dark:text-white/70">{count.toLocaleString()}</span>
 					</li>
 				{/each}
@@ -168,7 +173,7 @@
 						<tbody>
 							{#each stats.slowest_paths as row}
 								<tr class="border-b border-neutral-200/60 last:border-0 dark:border-white/5">
-									<td class="py-2 pr-4 font-mono text-neutral-700 dark:text-white/70 max-w-xs truncate">{row.path}</td>
+									<td class="py-2 pr-4 font-mono text-neutral-700 dark:text-white/70 max-w-xs truncate">{anonymize.on ? anonPathKey(row.path) : row.path}</td>
 									<td class="py-2 pr-4 text-right text-neutral-500 dark:text-white/50">{row.count.toLocaleString()}</td>
 									<td class="py-2 pr-4 text-right font-mono text-neutral-600 dark:text-white/60">{row.avg_ms.toFixed(1)}ms</td>
 									<td class="py-2 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">{row.p99_ms.toFixed(1)}ms</td>

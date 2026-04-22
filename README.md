@@ -16,6 +16,13 @@ A self-hosted analytics dashboard for [Caddy](https://caddyserver.com/) access l
 - **Log rotation aware** — detects inode changes and file truncation, seamlessly resumes from new file
 - **Tail-only ingestion** — on first start, skips existing log content and ingests only new entries going forward
 
+## Screenshots
+
+![Overview](screenshots/overview.png)
+![Graphs](screenshots/graphs.png)
+![Logs](screenshots/logs.png)
+![Map](screenshots/map.png)
+
 ## Architecture
 
 ```

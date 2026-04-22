@@ -22,7 +22,7 @@ struct Bucket {
     avg_size: f64,
     median_size: f64,
     p99_size: f64,
-    unique_hosts: usize,
+    unique_clients: usize,
 }
 
 fn percentile_f64(sorted: &[f64], p: f64) -> f64 {
@@ -79,7 +79,7 @@ async fn get_timeline(db: web::Data<Database>, query: web::Query<Query>) -> Http
         }
         b.durations.push(e.duration * 1000.0);
         b.sizes.push(e.size);
-        b.hosts.insert(e.request.host.clone());
+        b.hosts.insert(e.request.client_ip.clone());
     }
 
     let mut buckets: Vec<Bucket> = map
@@ -106,7 +106,7 @@ async fn get_timeline(db: web::Data<Database>, query: web::Query<Query>) -> Http
                 avg_size,
                 median_size: percentile_u64(&b.sizes, 50.0),
                 p99_size: percentile_u64(&b.sizes, 99.0),
-                unique_hosts: b.hosts.len(),
+                unique_clients: b.hosts.len(),
             }
         })
         .collect();
