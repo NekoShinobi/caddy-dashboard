@@ -23,6 +23,7 @@ struct Bucket {
     median_size: f64,
     p99_size: f64,
     unique_clients: usize,
+    methods: HashMap<String, usize>,
 }
 
 fn percentile_f64(sorted: &[f64], p: f64) -> f64 {
@@ -46,12 +47,14 @@ struct BucketAccum {
     durations: Vec<f64>,
     sizes: Vec<u64>,
     hosts: HashSet<String>,
+    methods: HashMap<String, usize>,
 }
 
 impl BucketAccum {
     fn new() -> Self {
         Self { total: 0, s2xx: 0, s3xx: 0, s4xx: 0, s5xx: 0,
-               durations: Vec::new(), sizes: Vec::new(), hosts: HashSet::new() }
+               durations: Vec::new(), sizes: Vec::new(), hosts: HashSet::new(),
+               methods: HashMap::new() }
     }
 }
 
@@ -80,6 +83,7 @@ async fn get_timeline(db: web::Data<Database>, query: web::Query<Query>) -> Http
         b.durations.push(e.duration * 1000.0);
         b.sizes.push(e.size);
         b.hosts.insert(e.request.client_ip.clone());
+        *b.methods.entry(e.request.method.clone()).or_insert(0) += 1;
     }
 
     let mut buckets: Vec<Bucket> = map
@@ -107,6 +111,7 @@ async fn get_timeline(db: web::Data<Database>, query: web::Query<Query>) -> Http
                 median_size: percentile_u64(&b.sizes, 50.0),
                 p99_size: percentile_u64(&b.sizes, 99.0),
                 unique_clients: b.hosts.len(),
+                methods: b.methods,
             }
         })
         .collect();

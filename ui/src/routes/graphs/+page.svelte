@@ -35,15 +35,17 @@
 		median_size: number;
 		p99_size: number;
 		unique_clients: number;
+		methods: Record<string, number>;
 	}
 
 	let canvasRequests = $state<HTMLCanvasElement | null>(null);
 	let canvasDuration = $state<HTMLCanvasElement | null>(null);
 	let canvasSize = $state<HTMLCanvasElement | null>(null);
 	let canvasHosts = $state<HTMLCanvasElement | null>(null);
+	let canvasMethods = $state<HTMLCanvasElement | null>(null);
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	let charts: (Chart<any> | null)[] = [null, null, null, null];
+	let charts: (Chart<any> | null)[] = [null, null, null, null, null];
 	let loading = $state(true);
 	let error = $state('');
 	let bucket = $state('hour');
@@ -111,8 +113,16 @@
 		}
 	}
 
+	function methodColor(method: string, c: ReturnType<typeof colors>): string {
+		const map: Record<string, string> = {
+			GET: c.green, POST: c.blue, PUT: c.yellow,
+			DELETE: c.red, PATCH: c.orange, HEAD: c.purple
+		};
+		return map[method.toUpperCase()] ?? c.total;
+	}
+
 	function renderAll() {
-		if (!canvasRequests || !canvasDuration || !canvasSize || !canvasHosts) return;
+		if (!canvasRequests || !canvasDuration || !canvasSize || !canvasHosts || !canvasMethods) return;
 		const c = colors();
 		const labels = buckets.map((b) => formatLabel(b.ts));
 		const scales = scaleOpts();
@@ -183,6 +193,25 @@
 			},
 			options: shared
 		});
+
+		const allMethods = [...new Set(buckets.flatMap((b) => Object.keys(b.methods ?? {})))].sort();
+		buildOrUpdate(4, canvasMethods!, {
+			type: 'bar',
+			data: {
+				labels,
+				datasets: allMethods.map((m) => ({
+					label: m,
+					data: buckets.map((b) => b.methods?.[m] ?? 0),
+					backgroundColor: methodColor(m, c) + '99',
+					borderColor: methodColor(m, c),
+					borderWidth: 1
+				}))
+			},
+			options: { ...shared, scales: { ...scales,
+				x: { ...scales.x, stacked: true },
+				y: { ...scales.y, stacked: true }
+			}}
+		});
 	}
 
 	async function fetchAndRender() {
@@ -243,7 +272,8 @@
 		{ label: 'Requests', ref: 'canvasRequests' },
 		{ label: 'Duration (ms)', ref: 'canvasDuration' },
 		{ label: 'Response Size (bytes)', ref: 'canvasSize' },
-		{ label: 'Unique Clients', ref: 'canvasHosts' }
+		{ label: 'Unique Clients', ref: 'canvasHosts' },
+		{ label: 'HTTP Methods', ref: 'canvasMethods' }
 	] as chart, i}
 		<div class="rounded-lg border border-neutral-200 bg-neutral-100 p-6 dark:border-white/10 dark:bg-white/5" class:hidden={loading}>
 			<h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-white/50">{chart.label}</h2>
@@ -251,7 +281,8 @@
 				{#if i === 0}<canvas bind:this={canvasRequests}></canvas>
 				{:else if i === 1}<canvas bind:this={canvasDuration}></canvas>
 				{:else if i === 2}<canvas bind:this={canvasSize}></canvas>
-				{:else}<canvas bind:this={canvasHosts}></canvas>
+				{:else if i === 3}<canvas bind:this={canvasHosts}></canvas>
+				{:else}<canvas bind:this={canvasMethods}></canvas>
 				{/if}
 			</div>
 		</div>

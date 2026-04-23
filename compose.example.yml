@@ -12,6 +12,7 @@ services:
       - PORT=9080
       - LOG_PATH=/config/access.log
       - DATA_DIR=/data
+      - RETENTION_DAYS=0  # 0 = keep forever
 
 volumes:
   caddy-dashboard-data:

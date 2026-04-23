@@ -4,6 +4,42 @@ use redb::Database;
 use serde::Deserialize;
 use tokio::sync::broadcast;
 
+/// Match `text` against `pattern` where `*` matches any sequence of characters.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    if !pattern.contains('*') {
+        return text.contains(pattern);
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut pos = 0usize;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        let search = &text[pos..];
+        if i == 0 {
+            // first segment must match at current position
+            if !search.starts_with(part) {
+                return false;
+            }
+            pos += part.len();
+        } else {
+            match search.find(part) {
+                Some(idx) => pos += idx + part.len(),
+                None => return false,
+            }
+        }
+    }
+    // if pattern doesn't end with *, last segment must reach end
+    if !pattern.ends_with('*') {
+        if let Some(last) = parts.last() {
+            if !last.is_empty() && !text.ends_with(last) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 #[derive(Deserialize)]
 struct Query {
     page: Option<usize>,
@@ -11,6 +47,8 @@ struct Query {
     status: Option<u16>,
     host: Option<String>,
     method: Option<String>,
+    ip: Option<String>,
+    path: Option<String>,
 }
 
 #[get("/logs")]
@@ -25,6 +63,12 @@ async fn get_logs(db: web::Data<Database>, query: web::Query<Query>) -> HttpResp
     }
     if let Some(ref method) = query.method {
         entries.retain(|e| e.request.method.eq_ignore_ascii_case(method));
+    }
+    if let Some(ref ip) = query.ip {
+        entries.retain(|e| e.request.client_ip.contains(ip.as_str()) || e.request.remote_ip.contains(ip.as_str()));
+    }
+    if let Some(ref path) = query.path {
+        entries.retain(|e| glob_match(path, &e.request.uri));
     }
 
     entries.sort_unstable_by(|a, b| b.ts.partial_cmp(&a.ts).unwrap_or(std::cmp::Ordering::Equal));

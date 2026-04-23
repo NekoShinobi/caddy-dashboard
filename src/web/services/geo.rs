@@ -1,7 +1,12 @@
 use actix_web::{get, web, HttpResponse};
 use redb::Database;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Deserialize)]
+struct Query {
+    since: Option<f64>,
+}
 
 #[derive(Serialize)]
 struct CountryCount {
@@ -10,8 +15,12 @@ struct CountryCount {
 }
 
 #[get("/geo")]
-async fn get_geo(db: web::Data<Database>) -> HttpResponse {
-    let entries = crate::db::load_entries(&db);
+async fn get_geo(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
+    let all = crate::db::load_entries(&db);
+    let entries: Vec<_> = match query.since {
+        Some(since) => all.into_iter().filter(|e| e.ts >= since).collect(),
+        None => all,
+    };
     let mut counts: HashMap<String, usize> = HashMap::new();
 
     for e in &entries {

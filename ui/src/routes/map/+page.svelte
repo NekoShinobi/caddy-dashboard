@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { COUNTRY_COORDS } from '$lib/countries';
+	import { timeRange } from '$lib/time-range.svelte';
+	import TimeRangeSelector from '$lib/components/TimeRangeSelector.svelte';
 	import type { Map, CircleMarker } from 'leaflet';
 
 	interface CountryCount {
@@ -8,6 +10,7 @@
 		count: number;
 	}
 
+	let L: typeof import('leaflet') | null = null;
 	let mapEl = $state<HTMLDivElement | null>(null);
 	let leafletMap: Map | null = null;
 	let markers: CircleMarker[] = [];
@@ -15,10 +18,46 @@
 	let loading = $state(true);
 	let error = $state('');
 
+	async function fetchAndPlot() {
+		if (!leafletMap || !L) return;
+		loading = true;
+		error = '';
+		try {
+			const since = timeRange.sinceParam();
+			const url = since ? `/api/geo?since=${since}` : '/api/geo';
+			const res = await fetch(url);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			data = await res.json();
+
+			markers.forEach((m) => m.remove());
+			markers = [];
+
+			const max = Math.max(...data.map((d) => d.count), 1);
+			for (const { country, count } of data) {
+				const coords = COUNTRY_COORDS[country];
+				if (!coords) continue;
+				const radius = 6 + (count / max) * 30;
+				const marker = L!.circleMarker(coords, {
+					radius,
+					color: '#3b82f6',
+					fillColor: '#3b82f6',
+					fillOpacity: 0.5,
+					weight: 1
+				})
+					.bindTooltip(`<strong>${country}</strong><br/>${count.toLocaleString()} requests`)
+					.addTo(leafletMap!);
+				markers.push(marker);
+			}
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Failed to fetch geo data';
+		} finally {
+			loading = false;
+		}
+	}
+
 	async function initMap() {
 		if (!mapEl) return;
-
-		const L = (await import('leaflet')).default;
+		L = (await import('leaflet')).default;
 		await import('leaflet/dist/leaflet.css');
 
 		leafletMap = L.map(mapEl, {
@@ -33,35 +72,7 @@
 			attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 		}).addTo(leafletMap);
 
-		try {
-			const res = await fetch('/api/geo');
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			data = await res.json();
-
-			const max = Math.max(...data.map((d) => d.count), 1);
-
-			for (const { country, count } of data) {
-				const coords = COUNTRY_COORDS[country];
-				if (!coords) continue;
-
-				const radius = 6 + (count / max) * 30;
-				const marker = L.circleMarker(coords, {
-					radius,
-					color: '#3b82f6',
-					fillColor: '#3b82f6',
-					fillOpacity: 0.5,
-					weight: 1
-				})
-					.bindTooltip(`<strong>${country}</strong><br/>${count.toLocaleString()} requests`)
-					.addTo(leafletMap!);
-
-				markers.push(marker);
-			}
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to fetch geo data';
-		} finally {
-			loading = false;
-		}
+		await fetchAndPlot();
 	}
 
 	onMount(initMap);
@@ -77,9 +88,12 @@
 </svelte:head>
 
 <div class="mx-auto max-w-6xl space-y-6">
-	<div>
-		<h1 class="text-3xl font-bold">Map</h1>
-		<p class="mt-1 text-neutral-500 dark:text-white/50">Request origins by country</p>
+	<div class="flex flex-wrap items-end justify-between gap-4">
+		<div>
+			<h1 class="text-3xl font-bold">Map</h1>
+			<p class="mt-1 text-neutral-500 dark:text-white/50">Request origins by country</p>
+		</div>
+		<TimeRangeSelector onchange={fetchAndPlot} />
 	</div>
 
 	{#if error}

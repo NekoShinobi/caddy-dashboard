@@ -20,6 +20,38 @@ pub fn open(data_dir: &str) -> Arc<Database> {
     Arc::new(db)
 }
 
+pub fn purge_old(db: &Database, cutoff_ts: f64) -> usize {
+    (|| -> Result<usize, Box<dyn std::error::Error>> {
+        let rtxn = db.begin_read()?;
+        let table = rtxn.open_table(LOGS)?;
+        let keys_to_delete: Vec<u64> = table
+            .iter()?
+            .filter_map(|r| {
+                let (k, v) = r.ok()?;
+                let entry: crate::log_parser::LogEntry = serde_json::from_str(v.value()).ok()?;
+                if entry.ts < cutoff_ts { Some(k.value()) } else { None }
+            })
+            .collect();
+        drop(table);
+        drop(rtxn);
+
+        let count = keys_to_delete.len();
+        if count == 0 {
+            return Ok(0);
+        }
+        let wtxn = db.begin_write()?;
+        {
+            let mut table = wtxn.open_table(LOGS)?;
+            for key in keys_to_delete {
+                table.remove(key)?;
+            }
+        }
+        wtxn.commit()?;
+        Ok(count)
+    })()
+    .unwrap_or(0)
+}
+
 pub fn load_entries(db: &Database) -> Vec<crate::log_parser::LogEntry> {
     (|| -> Result<Vec<_>, Box<dyn std::error::Error>> {
         let rtxn = db.begin_read()?;

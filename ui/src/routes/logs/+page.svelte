@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { page as appPage } from '$app/stores';
+	import { get } from 'svelte/store';
 	import { anonymize, anonIP, anonHost } from '$lib/anonymize.svelte';
 	import { colorTheme } from '$lib/color-theme.svelte';
 	import { theme } from '$lib/theme.svelte';
@@ -36,6 +38,8 @@
 	let filterStatus = $state('');
 	let filterHost = $state('');
 	let filterMethod = $state('');
+	let filterIP = $state('');
+	let filterPath = $state('');
 	let page = $state(0);
 	let limit = $state(50);
 	let pageInput = $state('1');
@@ -48,6 +52,8 @@
 			if (filterStatus) params.set('status', filterStatus);
 			if (filterHost) params.set('host', filterHost);
 			if (filterMethod) params.set('method', filterMethod);
+			if (filterIP) params.set('ip', filterIP);
+			if (filterPath) params.set('path', filterPath);
 			const res = await fetch(`/api/logs?${params}`);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			data = await res.json();
@@ -98,7 +104,14 @@
 		return ms < 1 ? `${(ms * 1000).toFixed(0)}µs` : `${ms.toFixed(1)}ms`;
 	}
 
-	onMount(fetchLogs);
+	onMount(() => {
+		const sp = get(appPage).url.searchParams;
+		if (sp.get('status'))  filterStatus  = sp.get('status')!;
+		if (sp.get('host'))    filterHost    = sp.get('host')!;
+		if (sp.get('ip'))      filterIP      = sp.get('ip')!;
+		if (sp.get('path'))    filterPath    = sp.get('path')!;
+		fetchLogs();
+	});
 </script>
 
 <div class="max-w-full space-y-6">
@@ -124,6 +137,18 @@
 			bind:value={filterMethod}
 			onkeydown={(e) => e.key === 'Enter' && applyFilters()}
 			placeholder="Method (e.g. GET)"
+			class="rounded-lg border border-neutral-200 bg-neutral-100 px-3 py-2 text-sm outline-none placeholder:text-neutral-400 focus:border-neutral-400 dark:border-white/10 dark:bg-white/5 dark:placeholder:text-white/30 dark:focus:border-white/30"
+		/>
+		<input
+			bind:value={filterIP}
+			onkeydown={(e) => e.key === 'Enter' && applyFilters()}
+			placeholder="IP"
+			class="rounded-lg border border-neutral-200 bg-neutral-100 px-3 py-2 text-sm outline-none placeholder:text-neutral-400 focus:border-neutral-400 dark:border-white/10 dark:bg-white/5 dark:placeholder:text-white/30 dark:focus:border-white/30"
+		/>
+		<input
+			bind:value={filterPath}
+			onkeydown={(e) => e.key === 'Enter' && applyFilters()}
+			placeholder="Path (e.g. /api/*)"
 			class="rounded-lg border border-neutral-200 bg-neutral-100 px-3 py-2 text-sm outline-none placeholder:text-neutral-400 focus:border-neutral-400 dark:border-white/10 dark:bg-white/5 dark:placeholder:text-white/30 dark:focus:border-white/30"
 		/>
 		<button

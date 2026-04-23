@@ -1,7 +1,12 @@
 use actix_web::{get, web, HttpResponse};
 use redb::Database;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+#[derive(Deserialize)]
+struct Query {
+    since: Option<f64>,
+}
 
 #[derive(Serialize)]
 struct SlowPath {
@@ -21,12 +26,18 @@ struct Stats {
     avg_duration_ms: f64,
     total_bytes: u64,
     unique_clients: usize,
+    top_referrers: Vec<(String, usize)>,
+    top_user_agents: Vec<(String, usize)>,
     slowest_paths: Vec<SlowPath>,
 }
 
 #[get("/stats")]
-async fn get_stats(db: web::Data<Database>) -> HttpResponse {
-    let entries = crate::db::load_entries(&db);
+async fn get_stats(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
+    let all = crate::db::load_entries(&db);
+    let entries: Vec<_> = match query.since {
+        Some(since) => all.into_iter().filter(|e| e.ts >= since).collect(),
+        None => all,
+    };
     let total = entries.len();
 
     let mut status_codes: HashMap<u16, usize> = HashMap::new();
@@ -37,6 +48,8 @@ async fn get_stats(db: web::Data<Database>) -> HttpResponse {
     let mut total_duration = 0.0f64;
     let mut total_bytes = 0u64;
     let mut client_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut referrers: HashMap<String, usize> = HashMap::new();
+    let mut user_agents: HashMap<String, usize> = HashMap::new();
 
     for e in &entries {
         *status_codes.entry(e.status).or_insert(0) += 1;
@@ -48,6 +61,20 @@ async fn get_stats(db: web::Data<Database>) -> HttpResponse {
         client_set.insert(e.request.client_ip.clone());
         total_duration += e.duration;
         total_bytes += e.size;
+        if let Some(r) = e.request.headers.get("Referer").or_else(|| e.request.headers.get("Referrer")) {
+            if let Some(v) = r.first() {
+                if !v.is_empty() {
+                    *referrers.entry(v.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        if let Some(ua) = e.request.headers.get("User-Agent") {
+            if let Some(v) = ua.first() {
+                if !v.is_empty() {
+                    *user_agents.entry(v.clone()).or_insert(0) += 1;
+                }
+            }
+        }
     }
 
     let sort_top = |mut map: HashMap<String, usize>, n: usize| -> Vec<(String, usize)> {
@@ -81,6 +108,8 @@ async fn get_stats(db: web::Data<Database>) -> HttpResponse {
         avg_duration_ms: if total > 0 { total_duration / total as f64 * 1000.0 } else { 0.0 },
         total_bytes,
         unique_clients: client_set.len(),
+        top_referrers: sort_top(referrers, 10),
+        top_user_agents: sort_top(user_agents, 10),
         slowest_paths,
     })
 }

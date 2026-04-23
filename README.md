@@ -4,6 +4,44 @@ A self-hosted analytics dashboard for [Caddy](https://caddyserver.com/) access l
 
 **Stack:** Rust (actix-web) · SvelteKit · Tailwind CSS v4 · redb · Chart.js · Leaflet
 
+
+## Goals
+
+I wanted to create a project where it was super easy to deploy and immediately get some decent visualizations into what kind of traffic you have.
+
+This is the recommended log settings that I use for my personal Caddy instance
+
+- Excludes inter-traffic, because I want more visibility on external traffic, not internal.
+- Reasonable rollover defaults, but currently caddy-dashboard will only fetch incoming logs that it sees. It does not retroactively retrieve logs.
+- You can just get rid of roll over logs if you want to rely on caddy-dashboard to hold onto historical data.
+- Excludes Uptime Kuma to reduce some noise.
+
+```
+(log_settings) {
+    log {
+        output file /config/access.log {
+            roll_size 30MB
+            roll_keep 5
+            roll_keep_for 720h
+        }
+        level debug
+    }
+    @name {
+        client_ip 172.18.0.0/12
+        client_ip 192.168.0.0/12
+    }
+
+    @uptime-kuma-agent {
+        header User-Agent Uptime-Kuma*
+    }
+
+    # Skip logging for specific IP ranges
+    log_skip @name
+    log_skip @uptime-kuma-agent
+}
+```
+
+
 ## Features
 
 - **Overview** — total requests, status code breakdown, top hosts/IPs/paths (host + path combined), slowest paths (avg + p99 duration)
