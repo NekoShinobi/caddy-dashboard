@@ -3,6 +3,7 @@ use tokio::sync::broadcast;
 
 mod db;
 mod env;
+mod geoip;
 mod ingest;
 mod log_parser;
 mod web;
@@ -46,6 +47,8 @@ async fn main() -> miette::Result<()> {
         });
     }
 
+    let geoip = geoip::open();
+
     log::info!("starting caddy-dashboard on port {}", *env::PORT);
-    web::start(db, tx).await
+    web::start(db, tx, geoip).await
 }

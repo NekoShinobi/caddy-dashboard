@@ -13,6 +13,7 @@ async fn spa_fallback(_req: HttpRequest) -> Result<NamedFile> {
 pub async fn start(
     db: Arc<Database>,
     tx: broadcast::Sender<crate::log_parser::LogEntry>,
+    geoip: crate::geoip::GeoIpDb,
 ) -> miette::Result<()> {
     let port = *crate::env::PORT;
     std::fs::create_dir_all("./static")
@@ -20,11 +21,13 @@ pub async fn start(
 
     let db_data = web::Data::from(db);
     let tx_data = web::Data::new(tx);
+    let geoip_data = web::Data::new(geoip);
 
     HttpServer::new(move || {
         App::new()
             .app_data(db_data.clone())
             .app_data(tx_data.clone())
+            .app_data(geoip_data.clone())
             .configure(services::configure)
             .service(Files::new("/", "./static").index_file("index.html"))
             .default_service(web::get().to(spa_fallback))

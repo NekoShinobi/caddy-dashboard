@@ -6,6 +6,9 @@ pub static LOG_PATH: LazyLock<String> =
 pub static DATA_DIR: LazyLock<String> =
     LazyLock::new(|| std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string()));
 
+pub static GEOIP_DB: LazyLock<Option<String>> =
+    LazyLock::new(|| std::env::var("GEOIP_DB").ok());
+
 /// 0 means retention is disabled.
 pub static RETENTION_DAYS: LazyLock<u64> = LazyLock::new(|| {
     std::env::var("RETENTION_DAYS")

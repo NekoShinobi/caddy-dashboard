@@ -66,6 +66,16 @@
 		return i >= 0 ? key.slice(i) : key;
 	}
 
+	function pathLogsLink(key: string): string {
+		const i = key.indexOf('/');
+		const path = i >= 0 ? key.slice(i) : key;
+		const host = i >= 0 ? key.slice(0, i) : '';
+		const p = new URLSearchParams();
+		p.set('path', path);
+		if (host) p.set('host', host);
+		return `/logs?${p}`;
+	}
+
 	function formatBytes(bytes: number): string {
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -189,7 +199,7 @@
 			<ul class="space-y-2">
 				{#each stats.top_paths as [path, count]}
 					<li class="flex items-center justify-between gap-4">
-						<a href="/logs?path={encodeURIComponent(pathUri(path))}" class="truncate font-mono text-sm text-neutral-700 hover:underline dark:text-white/70">{anonymize.on ? anonPathKey(path) : path}</a>
+						<a href={pathLogsLink(path)} class="truncate font-mono text-sm text-neutral-700 hover:underline dark:text-white/70">{anonymize.on ? anonPathKey(path) : path}</a>
 						<span class="shrink-0 text-sm text-neutral-600 dark:text-white/70">{count.toLocaleString()}</span>
 					</li>
 				{/each}
@@ -246,7 +256,7 @@
 						<tbody>
 							{#each stats.slowest_paths as row}
 								<tr class="border-b border-neutral-200/60 last:border-0 dark:border-white/5">
-									<td class="py-2 pr-4 max-w-xs truncate"><a href="/logs?path={encodeURIComponent(pathUri(row.path))}" class="font-mono text-neutral-700 hover:underline dark:text-white/70">{anonymize.on ? anonPathKey(row.path) : row.path}</a></td>
+									<td class="py-2 pr-4 max-w-xs truncate"><a href={pathLogsLink(row.path)} class="font-mono text-neutral-700 hover:underline dark:text-white/70">{anonymize.on ? anonPathKey(row.path) : row.path}</a></td>
 									<td class="py-2 pr-4 text-right text-neutral-500 dark:text-white/50">{row.count.toLocaleString()}</td>
 									<td class="py-2 pr-4 text-right font-mono text-neutral-600 dark:text-white/60">{row.avg_ms.toFixed(1)}ms</td>
 									<td class="py-2 text-right font-mono font-semibold text-orange-600 dark:text-orange-400">{row.p99_ms.toFixed(1)}ms</td>

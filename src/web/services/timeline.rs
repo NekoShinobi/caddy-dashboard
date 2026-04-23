@@ -60,15 +60,32 @@ impl BucketAccum {
 
 #[get("/timeline")]
 async fn get_timeline(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let entries = crate::db::load_entries(&db);
+    let all = crate::db::load_entries(&db);
 
-    let bucket_secs: u64 = match query.bucket.as_deref().unwrap_or("hour") {
-        "minute" => 60,
-        "day" => 86400,
-        _ => 3600,
+    let (bucket_secs, window_secs): (u64, u64) = match query.bucket.as_deref().unwrap_or("hour") {
+        "minute" => (60,    3_600),
+        "day"    => (86400, 2_592_000),
+        _        => (3600,  86_400),
     };
 
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let cutoff = now_secs.saturating_sub(window_secs) as f64;
+    let entries: Vec<_> = all.into_iter().filter(|e| e.ts >= cutoff).collect();
+
     let mut map: HashMap<u64, BucketAccum> = HashMap::new();
+
+    // Pre-populate every bucket in the window so the x-axis always spans the full range
+    let start_bucket = (cutoff as u64 / bucket_secs) * bucket_secs;
+    let end_bucket   = (now_secs / bucket_secs) * bucket_secs;
+    let mut t = start_bucket;
+    while t <= end_bucket {
+        map.insert(t, BucketAccum::new());
+        t += bucket_secs;
+    }
 
     for e in &entries {
         let key = (e.ts as u64 / bucket_secs) * bucket_secs;

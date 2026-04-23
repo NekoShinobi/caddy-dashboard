@@ -13,6 +13,7 @@ services:
       - LOG_PATH=/config/access.log
       - DATA_DIR=/data
       - RETENTION_DAYS=0  # 0 = keep forever
+      # - GEOIP_DB=/config/GeoLite2-City.mmdb  # MaxMind GeoLite2-City or DB-IP Lite City .mmdb for heatmap mode
 
 volumes:
   caddy-dashboard-data:

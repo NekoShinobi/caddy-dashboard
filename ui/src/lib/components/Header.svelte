@@ -8,7 +8,8 @@
 		{ href: '/', label: 'Overview' },
 		{ href: '/logs', label: 'Logs' },
 		{ href: '/graphs', label: 'Graphs' },
-		{ href: '/map', label: 'Map' }
+		{ href: '/map', label: 'Map' },
+		{ href: '/reports', label: 'Reports' }
 	];
 </script>
 
