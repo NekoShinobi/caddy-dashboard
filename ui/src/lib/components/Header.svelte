@@ -11,6 +11,12 @@
 		{ href: '/map', label: 'Map' },
 		{ href: '/reports', label: 'Reports' }
 	];
+
+	let now = $state(new Date());
+	$effect(() => {
+		const id = setInterval(() => { now = new Date(); }, 1000);
+		return () => clearInterval(id);
+	});
 </script>
 
 <header class="border-b border-neutral-200 px-6 py-4 dark:border-white/10">
@@ -27,6 +33,7 @@
 			</a>
 		{/each}
 		<div class="ml-auto flex items-center gap-3">
+				<span class="font-mono text-xs tabular-nums text-neutral-400 dark:text-white/30">{now.toLocaleTimeString()}</span>
 			<ThemePicker />
 			<button
 				onclick={anonymize.toggle}

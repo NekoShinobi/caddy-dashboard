@@ -1,5 +1,6 @@
 use actix_web::web;
 
+mod ai;
 mod geo;
 mod logs;
 mod reports;
@@ -16,6 +17,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
             .service(timeline::get_timeline)
             .service(geo::get_geo)
             .service(reports::get_error_rates)
-            .service(reports::get_large_payloads),
+            .service(reports::get_large_payloads)
+            .service(ai::get_ai_analysis),
     );
 }

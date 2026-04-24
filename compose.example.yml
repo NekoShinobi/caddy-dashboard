@@ -14,6 +14,8 @@ services:
       - DATA_DIR=/data
       - RETENTION_DAYS=0  # 0 = keep forever
       # - GEOIP_DB=/config/GeoLite2-City.mmdb  # MaxMind GeoLite2-City or DB-IP Lite City .mmdb for heatmap mode
+      # - OLLAMA_HOST=http://ollama:11434       # Ollama endpoint for AI traffic analysis
+      # - OLLAMA_MODEL=llama3.2                 # Model to use (must be pulled)
 
 volumes:
   caddy-dashboard-data:

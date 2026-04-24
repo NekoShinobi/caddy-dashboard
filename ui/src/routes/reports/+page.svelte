@@ -1,8 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { marked } from 'marked';
 	import { timeRange } from '$lib/time-range.svelte';
 	import TimeRangeSelector from '$lib/components/TimeRangeSelector.svelte';
 	import { anonymize } from '$lib/anonymize.svelte';
+
+	const renderer = new marked.Renderer();
+	marked.setOptions({ renderer, gfm: true, breaks: true });
 
 	interface EndpointStat {
 		method: string;
@@ -35,6 +39,66 @@
 	let loading = $state(true);
 	let payloadsLoading = $state(true);
 	let error = $state('');
+
+	// AI analysis
+	let aiText = $state('');
+	let aiRunning = $state(false);
+	let aiError = $state('');
+	let aiDone = $state(false);
+	let aiSavedAt = $state<Date | null>(null);
+
+	const AI_STORAGE_KEY = 'caddy-dashboard:ai-analysis';
+
+	onMount(() => {
+		try {
+			const saved = localStorage.getItem(AI_STORAGE_KEY);
+			if (saved) {
+				const { text, ts } = JSON.parse(saved);
+				if (text) { aiText = text; aiDone = true; aiSavedAt = new Date(ts); }
+			}
+		} catch {}
+	});
+
+	async function runAiAnalysis() {
+		aiText = '';
+		aiError = '';
+		aiDone = false;
+		aiSavedAt = null;
+		aiRunning = true;
+		try {
+			const res = await fetch('/api/reports/ai-analysis');
+			if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			let buf = '';
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buf += decoder.decode(value, { stream: true });
+				const lines = buf.split('\n');
+				buf = lines.pop() ?? '';
+				for (const line of lines) {
+					if (!line.startsWith('data: ')) continue;
+					try {
+						const evt = JSON.parse(line.slice(6));
+						if (evt.token) aiText += evt.token;
+						if (evt.error) aiError = evt.error;
+						if (evt.done) aiDone = true;
+					} catch {}
+				}
+			}
+		} catch (e) {
+			aiError = e instanceof Error ? e.message : 'Analysis failed';
+		} finally {
+			aiRunning = false;
+			aiDone = true;
+			if (aiText && !aiError) {
+				const now = new Date();
+				aiSavedAt = now;
+				try { localStorage.setItem(AI_STORAGE_KEY, JSON.stringify({ text: aiText, ts: now.toISOString() })); } catch {}
+			}
+		}
+	}
 	let expandedIp = $state<string | null>(null);
 
 	function formatBytes(b: number) {
@@ -132,6 +196,54 @@
 		<TimeRangeSelector onchange={fetchReport} />
 	</div>
 
+	<!-- Section: AI Analysis -->
+	<div class="space-y-3">
+		<div class="flex items-center gap-3">
+			<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-violet-500">
+				<path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 3"/><circle cx="18" cy="6" r="4" fill="currentColor" class="text-violet-500"/>
+			</svg>
+			<h2 class="font-semibold">AI Traffic Analysis</h2>
+			<span class="text-xs text-neutral-400 dark:text-white/30">last 24 hours · via Ollama</span>
+			{#if aiSavedAt && !aiRunning}
+				<span class="text-xs text-neutral-400 dark:text-white/30">· saved {aiSavedAt.toLocaleString()}</span>
+			{/if}
+			<button
+				onclick={runAiAnalysis}
+				disabled={aiRunning}
+				class="ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors disabled:opacity-50
+					{aiRunning
+						? 'border-violet-300 bg-violet-50 text-violet-600 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-400'
+						: 'border-neutral-200 hover:bg-neutral-100 dark:border-white/10 dark:hover:bg-white/5'}"
+			>
+				{#if aiRunning}
+					<svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+					</svg>
+					Analysing…
+				{:else}
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+					{aiDone ? 'Re-run' : 'Run analysis'}
+				{/if}
+			</button>
+		</div>
+
+		{#if aiError}
+			<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">{aiError}</div>
+		{/if}
+
+		{#if aiText}
+			<div class="ai-output rounded-lg border border-neutral-200 bg-neutral-50 p-5 dark:border-white/10 dark:bg-white/[0.03]">
+				{@html marked(aiText)}{#if aiRunning}<span class="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current align-middle opacity-70"></span>{/if}
+			</div>
+		{:else if !aiRunning && !aiDone}
+			<div class="rounded-lg border border-dashed border-neutral-200 p-8 text-center text-sm text-neutral-400 dark:border-white/10 dark:text-white/30">
+				Click <strong>Run analysis</strong> to send the last 24 hours of traffic stats to your local Ollama instance for review.
+				<div class="mt-1 text-xs">Requires <code class="rounded bg-neutral-100 px-1 dark:bg-white/10">OLLAMA_HOST</code> reachable and <code class="rounded bg-neutral-100 px-1 dark:bg-white/10">OLLAMA_MODEL</code> pulled.</div>
+			</div>
+		{/if}
+	</div>
+
 	<!-- Section: High Error Rate IPs -->
 	<div class="space-y-3">
 		<div class="flex items-center gap-2">
@@ -199,7 +311,7 @@
 								<td class="px-4 py-3 text-right">
 									<a
 										href={logsLink(row.ip)}
-										class="rounded border border-neutral-200 px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5"
+										class="inline-block whitespace-nowrap rounded border border-neutral-200 px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5"
 									>Logs →</a>
 								</td>
 							</tr>
@@ -288,3 +400,31 @@
 		{/if}
 	</div>
 </div>
+
+<style>
+	:global(.ai-output h1, .ai-output h2, .ai-output h3) {
+		font-weight: 600;
+		margin-top: 1rem;
+		margin-bottom: 0.25rem;
+	}
+	:global(.ai-output h1) { font-size: 1.1rem; }
+	:global(.ai-output h2) { font-size: 1rem; }
+	:global(.ai-output h3) { font-size: 0.9rem; }
+	:global(.ai-output p) { margin-bottom: 0.5rem; font-size: 0.875rem; line-height: 1.6; }
+	:global(.ai-output ul, .ai-output ol) { padding-left: 1.25rem; margin-bottom: 0.5rem; }
+	:global(.ai-output li) { font-size: 0.875rem; line-height: 1.6; margin-bottom: 0.2rem; }
+	:global(.ai-output ul) { list-style-type: disc; }
+	:global(.ai-output ol) { list-style-type: decimal; }
+	:global(.ai-output strong) { font-weight: 600; }
+	:global(.ai-output em) { font-style: italic; }
+	:global(.ai-output code) {
+		font-family: monospace;
+		font-size: 0.8rem;
+		background: rgba(0,0,0,0.06);
+		border-radius: 0.25rem;
+		padding: 0.1rem 0.3rem;
+	}
+	:global(.dark .ai-output code) { background: rgba(255,255,255,0.08); }
+	:global(.ai-output hr) { border: none; border-top: 1px solid rgba(0,0,0,0.1); margin: 0.75rem 0; }
+	:global(.dark .ai-output hr) { border-top-color: rgba(255,255,255,0.1); }
+</style>

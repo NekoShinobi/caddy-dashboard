@@ -49,6 +49,12 @@ async fn main() -> miette::Result<()> {
 
     let geoip = geoip::open();
 
+    log::info!(
+        "Ollama: host={} model={}",
+        *env::OLLAMA_HOST,
+        *env::OLLAMA_MODEL
+    );
+
     log::info!("starting caddy-dashboard on port {}", *env::PORT);
     web::start(db, tx, geoip).await
 }
