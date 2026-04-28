@@ -72,11 +72,18 @@ fn ingest_batch(
             Ok(0) => break,
             Ok(n) => {
                 pos += n as u64;
-                if let Ok(entry) = serde_json::from_str(line.trim_end()) {
-                    entries.push(entry);
+                let trimmed = line.trim_end();
+                if !trimmed.is_empty() {
+                    match serde_json::from_str(trimmed) {
+                        Ok(entry) => entries.push(entry),
+                        Err(e) => log::error!("ingest: failed to parse log line: {e} — line: {trimmed}"),
+                    }
                 }
             }
-            Err(_) => break,
+            Err(e) => {
+                log::error!("ingest: read_line error: {e}");
+                break;
+            }
         }
     }
 
@@ -92,7 +99,13 @@ fn ingest_batch(
         let mut next_id = meta.get(META_NEXT_ID)?.map(|v| v.value()).unwrap_or(0);
 
         for entry in &entries {
-            let json = serde_json::to_string(entry).unwrap_or_default();
+            let json = match serde_json::to_string(entry) {
+                Ok(j) => j,
+                Err(e) => {
+                    log::error!("ingest: failed to serialize log entry: {e}");
+                    continue;
+                }
+            };
             logs.insert(next_id, json.as_str())?;
             next_id += 1;
         }

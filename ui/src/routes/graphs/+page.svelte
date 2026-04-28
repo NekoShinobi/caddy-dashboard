@@ -219,7 +219,10 @@
 		error = '';
 		try {
 			const res = await fetch(`/api/timeline?bucket=${bucket}`);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			if (!res.ok) {
+				const d = await res.json().catch(() => ({}));
+				throw new Error(d.error ?? `HTTP ${res.status}`);
+			}
 			const data = await res.json();
 			buckets = data.buckets;
 			renderAll();

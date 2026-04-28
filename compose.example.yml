@@ -12,10 +12,41 @@ services:
       - PORT=9080
       - LOG_PATH=/config/access.log
       - DATA_DIR=/data
-      - RETENTION_DAYS=0  # 0 = keep forever
-      # - GEOIP_DB=/config/GeoLite2-City.mmdb  # MaxMind GeoLite2-City or DB-IP Lite City .mmdb for heatmap mode
-      # - OLLAMA_HOST=http://ollama:11434       # Ollama endpoint for AI traffic analysis
-      # - OLLAMA_MODEL=llama3.2                 # Model to use (must be pulled)
+      - RETENTION_DAYS=0            # 0 = keep forever
+      # - COOKIE_SECURE=true        # set false only for local dev over plain HTTP
+      # - BASE_URL=https://dash.example.com  # required when behind a reverse proxy (used for OIDC redirect URI)
+
+      # ── GeoIP ───────────────────────────────────────────────────────────────
+      # - GEOIP_DB=/config/GeoLite2-City.mmdb  # MaxMind GeoLite2-City or DB-IP Lite City .mmdb
+
+      # ── AI analysis (Ollama) ────────────────────────────────────────────────
+      # - OLLAMA_HOST=http://ollama:11434
+      # - OLLAMA_MODEL=llama3.2
+
+      # ── OIDC / SSO ─────────────────────────────────────────────────────────
+      # Set OIDC_CLIENT_ID to enable OIDC. Register the following redirect URI
+      # with your provider:  {BASE_URL}/api/auth/oidc/callback
+      #
+      # - OIDC_CLIENT_ID=your-client-id
+      # - OIDC_CLIENT_SECRET=your-client-secret
+      # - OIDC_ISSUER_URL=https://sso.example.com/realms/myrealm   # trailing slash stripped automatically
+      # - OIDC_SCOPES=openid email profile      # default; add provider-specific scopes if needed
+      # - OIDC_PROVIDERS_NAME=My SSO            # label shown on the login button
+      # - OIDC_PROVIDER_LOGO_URL=https://...    # optional logo shown on the login button
+      #
+      # Admin claim — grant admin rights to users whose claim matches the value.
+      # Supports flat string, array of strings, and boolean claims.
+      # If unset, the first user to log in via OIDC becomes admin; subsequent users are non-admin.
+      # - OIDC_ADMIN_CLAIM=groups
+      # - OIDC_ADMIN_VALUE=caddy-dashboard-admins
+      #
+      # Disable the local username/password login form and API endpoint.
+      # Users can still be created/managed via the admin panel.
+      # - OIDC_DISABLE_LOGIN=false
+
+      # ── Emergency recovery ──────────────────────────────────────────────────
+      # Wipe all users and sessions on next startup (remove after use).
+      # - USER_DATABASE_RESET=false
 
 volumes:
   caddy-dashboard-data:

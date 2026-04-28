@@ -119,21 +119,67 @@ python3 inject-logs.py --loop --interval 200 # one entry every 200ms
 
 Each entry's timestamp is set to the current time.
 
+## Authentication
+
+On first start, navigate to the dashboard and create the initial admin account. Subsequent registrations are disabled — additional users are managed through the admin panel (Settings → User Management).
+
+To reset the user database (e.g., locked out): set `USER_DATABASE_RESET=true` in the environment, restart the container, then remove the variable and create a new admin account. All sessions are also invalidated.
+
+### OIDC / SSO
+
+Set `OIDC_CLIENT_ID` to enable SSO login alongside (or instead of) local accounts.
+
+**Provider setup:** register the following redirect URI with your identity provider:
+```
+{BASE_URL}/api/auth/oidc/callback
+```
+
+**Scopes:** the default `openid email profile` is sufficient for most providers. An email address is required — logins without one are rejected. If `email_verified` is present and `false` the login is also rejected.
+
+**User matching:** OIDC users are matched to existing accounts by email (case-insensitive). A new account is created on first login if no match exists. The username is derived from `preferred_username`, the local part of the email, or the OIDC `sub` claim.
+
+**Admin rights:**
+- If `OIDC_ADMIN_CLAIM` + `OIDC_ADMIN_VALUE` are set, admin status is synced from the claim on every login.
+- If neither is set, the first OIDC user to log in gets admin rights; subsequent users are non-admin by default.
+
+**Logout:** if the provider exposes an `end_session_endpoint` in its discovery document, logging out from the dashboard also triggers RP-initiated logout at the provider (with `id_token_hint`).
+
+**OIDC-only mode:** set `OIDC_DISABLE_LOGIN=true` to hide the local login form and block the login/signup API endpoints entirely.
+
 ## Configuration
 
 All configuration via environment variables:
 
-| Variable          | Default                  | Description                                            |
-|-------------------|--------------------------|--------------------------------------------------------|
-| `LOG_PATH`        | `/config/access.log`     | Path to Caddy access log file                          |
-| `DATA_DIR`        | `./data`                 | Directory for the redb database                        |
-| `PORT`            | `9080`                   | HTTP port                                              |
-| `GEOIP_DB`        | *(embedded DB-IP Lite)*  | Path to an external MaxMind-compatible `.mmdb` file    |
-| `RETENTION_DAYS`  | `0` (disabled)           | Purge entries older than N days (0 = keep forever)     |
-| `OLLAMA_HOST`     | `http://localhost:11434` | Ollama API base URL for AI analysis                    |
-| `OLLAMA_MODEL`    | `llama3.2`               | Ollama model name (must be pulled)                     |
+### Core
+
+| Variable              | Default                  | Description                                                       |
+|-----------------------|--------------------------|-------------------------------------------------------------------|
+| `LOG_PATH`            | `/config/access.log`     | Path to Caddy access log file                                     |
+| `DATA_DIR`            | `./data`                 | Directory for the redb database                                   |
+| `PORT`                | `9080`                   | HTTP port                                                         |
+| `GEOIP_DB`            | *(embedded DB-IP Lite)*  | Path to an external MaxMind-compatible `.mmdb` file               |
+| `RETENTION_DAYS`      | `0` (disabled)           | Purge entries older than N days (0 = keep forever)                |
+| `OLLAMA_HOST`         | `http://localhost:11434` | Ollama API base URL for AI analysis                               |
+| `OLLAMA_MODEL`        | `llama3.2`               | Ollama model name (must be pulled)                                |
+| `COOKIE_SECURE`       | `true`                   | Set `false` only for local dev over plain HTTP                    |
+| `BASE_URL`            | *(derived from request)* | Public base URL, e.g. `https://dash.example.com` — required for OIDC behind a reverse proxy |
+| `USER_DATABASE_RESET` | `false`                  | Set `true` to wipe all users and sessions on next startup         |
 
 In Docker, `LOG_PATH` defaults to `/config/access.log` and `DATA_DIR` defaults to `/data`.
+
+### OIDC
+
+| Variable               | Default                   | Description                                                                   |
+|------------------------|---------------------------|-------------------------------------------------------------------------------|
+| `OIDC_CLIENT_ID`       | *(unset)*                 | Client ID — setting this enables OIDC                                         |
+| `OIDC_CLIENT_SECRET`   | *(unset)*                 | Client secret                                                                 |
+| `OIDC_ISSUER_URL`      | *(unset)*                 | Issuer base URL (discovery doc fetched from `{issuer}/.well-known/openid-configuration`) |
+| `OIDC_SCOPES`          | `openid email profile`    | Space-separated scopes to request                                             |
+| `OIDC_ADMIN_CLAIM`     | *(unset)*                 | Claim name to check for admin rights (e.g. `groups`, `roles`)                 |
+| `OIDC_ADMIN_VALUE`     | *(unset)*                 | Value within `OIDC_ADMIN_CLAIM` that grants admin (e.g. `admins`)             |
+| `OIDC_PROVIDERS_NAME`  | `SSO`                     | Label shown on the login button                                               |
+| `OIDC_PROVIDER_LOGO_URL` | *(unset)*               | Optional logo URL shown on the login button                                   |
+| `OIDC_DISABLE_LOGIN`   | `false`                   | Hide local login form and block login/signup endpoints                        |
 
 ## API
 
@@ -174,23 +220,39 @@ caddy-dashboard/
 ├── src/
 │   ├── main.rs            Entry point
 │   ├── env.rs             Environment variable config
-│   ├── db.rs              redb setup and helpers
+│   ├── db.rs              redb setup and helpers (logs, users, sessions, settings, oidc_tokens)
+│   ├── auth.rs            Password hashing (Argon2id)
+│   ├── session.rs         Session token generation and cookie helpers
+│   ├── oidc.rs            OIDC discovery, token exchange, userinfo, admin claim check
+│   ├── login_throttle.rs  Progressive delay on repeated login failures
 │   ├── geoip.rs           GeoIP lookup (embedded DB-IP Lite or external file)
 │   ├── ingest.rs          Background log ingestion task
 │   ├── log_parser.rs      Caddy JSON log structs
 │   └── web/
 │       ├── mod.rs         actix-web server + SPA fallback
+│       ├── middleware.rs  RequireAuth middleware
 │       └── services/      API route handlers
+│           ├── auth.rs    Login, logout, signup, password change
+│           ├── oidc.rs    OIDC login initiation and callback
+│           ├── admin.rs   User management (admin only)
+│           ├── settings.rs Site settings (AI prompt)
 │           ├── logs.rs    Log query, filtering, CSV export
 │           ├── reports.rs Error rate and large payload reports
 │           └── ai.rs      Ollama AI analysis (SSE streaming)
 ├── ui/                    SvelteKit frontend
-│   └── src/routes/
-│       ├── +page.svelte   Overview dashboard
-│       ├── logs/          Log table with filters, modal, CSV export
-│       ├── graphs/        Time-series charts
-│       ├── map/           Geographic origin map (cluster mode)
-│       └── reports/       Reports + AI analysis
+│   └── src/
+│       ├── lib/
+│       │   ├── auth.svelte.ts       Auth state, OIDC config, login/logout helpers
+│       │   ├── crypto.ts            Client-side SHA-256 password hashing
+│       │   └── components/
+│       │       └── AuthGate.svelte  Login/SSO gate wrapping authenticated routes
+│       └── routes/
+│           ├── +page.svelte   Overview dashboard
+│           ├── logs/          Log table with filters, modal, CSV export
+│           ├── graphs/        Time-series charts
+│           ├── map/           Geographic origin map (cluster mode)
+│           ├── reports/       Reports + AI analysis
+│           └── settings/      Account, user management, site settings
 ├── inject-logs.py         Test data utility
 ├── Dockerfile
 └── compose.example.yml

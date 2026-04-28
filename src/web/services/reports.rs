@@ -32,7 +32,10 @@ pub async fn get_error_rates(
     query: web::Query<Query>,
 ) -> HttpResponse {
     let min_requests = query.min_requests.unwrap_or(5);
-    let all = crate::db::load_entries(&db);
+    let all = match crate::db::load_entries(&db) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
+    };
     let entries: Vec<_> = match query.since {
         Some(since) => all.into_iter().filter(|e| e.ts >= since).collect(),
         None => all,
@@ -134,7 +137,10 @@ pub async fn get_large_payloads(
     db: web::Data<Database>,
     query: web::Query<Query>,
 ) -> HttpResponse {
-    let all = crate::db::load_entries(&db);
+    let all = match crate::db::load_entries(&db) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
+    };
     let mut entries: Vec<_> = match query.since {
         Some(since) => all.into_iter().filter(|e| e.ts >= since).collect(),
         None => all,

@@ -159,7 +159,10 @@
 				pageInput = '1';
 				return;
 			}
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			if (!res.ok) {
+				const d = await res.json().catch(() => ({}));
+				throw new Error(d.error ?? `HTTP ${res.status}`);
+			}
 			data = await res.json();
 			pageInput = String(page + 1);
 		} catch (e) {

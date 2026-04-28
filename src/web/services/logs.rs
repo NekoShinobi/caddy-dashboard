@@ -149,7 +149,11 @@ fn csv_field(s: &str) -> String {
 
 #[get("/logs")]
 async fn get_logs(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let entries = apply_filters(crate::db::load_entries(&db), &query);
+    let raw = match crate::db::load_entries(&db) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
+    };
+    let entries = apply_filters(raw, &query);
     let limit = query.limit.unwrap_or(50).min(500);
     let page = query.page.unwrap_or(0);
     let total = entries.len();
@@ -164,7 +168,11 @@ async fn get_logs(db: web::Data<Database>, query: web::Query<Query>) -> HttpResp
 
 #[get("/logs/export")]
 async fn export_logs_csv(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let entries = apply_filters(crate::db::load_entries(&db), &query);
+    let raw = match crate::db::load_entries(&db) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
+    };
+    let entries = apply_filters(raw, &query);
 
     let mut csv = String::from(
         "timestamp,unix_ts,status,method,protocol,host,path,duration_ms,size_bytes,bytes_read,client_ip,remote_ip,user_agent\n"
@@ -208,18 +216,27 @@ async fn stream_logs(tx: web::Data<broadcast::Sender<crate::log_parser::LogEntry
     let event_stream = stream::unfold(rx, |mut rx| async move {
         match rx.recv().await {
             Ok(entry) => {
-                let json = serde_json::to_string(&entry).unwrap_or_default();
-                Some((
-                    Ok::<actix_web::web::Bytes, actix_web::Error>(
-                        actix_web::web::Bytes::from(format!("data: {json}\n\n")),
-                    ),
-                    rx,
-                ))
+                match serde_json::to_string(&entry) {
+                    Ok(json) => Some((
+                        Ok::<actix_web::web::Bytes, actix_web::Error>(
+                            actix_web::web::Bytes::from(format!("data: {json}\n\n")),
+                        ),
+                        rx,
+                    )),
+                    Err(e) => {
+                        log::error!("stream_logs: serialize entry: {e}");
+                        None
+                    }
+                }
             }
-            Err(broadcast::error::RecvError::Lagged(_)) => {
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                log::warn!("stream_logs: subscriber lagged, dropped {n} messages");
                 Some((Ok(actix_web::web::Bytes::from_static(b": lagged\n\n")), rx))
             }
-            Err(_) => None,
+            Err(e) => {
+                log::error!("stream_logs: broadcast channel closed: {e}");
+                None
+            }
         }
     });
 

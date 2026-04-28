@@ -4,6 +4,9 @@
 	import { timeRange } from '$lib/time-range.svelte';
 	import TimeRangeSelector from '$lib/components/TimeRangeSelector.svelte';
 	import { anonymize } from '$lib/anonymize.svelte';
+	import { colorTheme } from '$lib/color-theme.svelte';
+	import { theme } from '$lib/theme.svelte';
+	import { auth } from '$lib/auth.svelte';
 
 	const renderer = new marked.Renderer();
 	marked.setOptions({ renderer, gfm: true, breaks: true });
@@ -67,7 +70,10 @@
 		aiRunning = true;
 		try {
 			const res = await fetch('/api/reports/ai-analysis');
-			if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+			if (!res.ok || !res.body) {
+				const data = await res.json().catch(() => ({}));
+				throw new Error(data.error ?? `HTTP ${res.status}`);
+			}
 			const reader = res.body.getReader();
 			const decoder = new TextDecoder();
 			let buf = '';
@@ -99,7 +105,6 @@
 			}
 		}
 	}
-	let expandedIp = $state<string | null>(null);
 
 	function formatBytes(b: number) {
 		if (b < 1024) return `${b} B`;
@@ -126,8 +131,14 @@
 				fetch(`/api/reports/error-rates${qs}`),
 				fetch(`/api/reports/large-payloads${qs}`)
 			]);
-			if (!errRes.ok) throw new Error(`HTTP ${errRes.status}`);
-			if (!payRes.ok) throw new Error(`HTTP ${payRes.status}`);
+			if (!errRes.ok) {
+				const d = await errRes.json().catch(() => ({}));
+				throw new Error(d.error ?? `HTTP ${errRes.status}`);
+			}
+			if (!payRes.ok) {
+				const d = await payRes.json().catch(() => ({}));
+				throw new Error(d.error ?? `HTTP ${payRes.status}`);
+			}
 			data = await errRes.json();
 			payloads = await payRes.json();
 		} catch (e) {
@@ -142,43 +153,53 @@
 		return ((row.errors_4xx + row.errors_5xx) / row.total) * 100;
 	}
 
-	function rateColor(rate: number) {
-		if (rate >= 80) return 'text-red-500 dark:text-red-400';
-		if (rate >= 50) return 'text-orange-500 dark:text-orange-400';
-		if (rate >= 20) return 'text-amber-500 dark:text-amber-400';
-		return 'text-neutral-500 dark:text-white/50';
+	function tc() { return colorTheme.theme[theme.dark ? 'dark' : 'light']; }
+
+	function statusColor(code: number): string {
+		const t = tc();
+		if (code >= 500) return t.red;
+		if (code >= 400) return t.yellow;
+		if (code >= 300) return t.blue;
+		return t.green;
 	}
 
-	function rateBadgeBg(rate: number) {
-		if (rate >= 80) return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400';
-		if (rate >= 50) return 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-400';
-		if (rate >= 20) return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400';
-		return 'bg-neutral-100 text-neutral-600 dark:bg-white/5 dark:text-white/50';
-	}
-
-	function methodColor(m: string) {
+	function methodColor(m: string): string {
+		const t = tc();
 		const map: Record<string, string> = {
-			GET: 'text-green-600 dark:text-green-400',
-			POST: 'text-blue-600 dark:text-blue-400',
-			PUT: 'text-yellow-600 dark:text-yellow-400',
-			DELETE: 'text-red-600 dark:text-red-400',
-			PATCH: 'text-orange-600 dark:text-orange-400',
+			GET: t.green, POST: t.blue, PUT: t.yellow, DELETE: t.red, PATCH: t.orange
 		};
-		return map[m] ?? 'text-neutral-500';
+		return map[m] ?? (theme.dark ? 'rgba(255,255,255,0.5)' : '#6b7280');
 	}
 
-	function codeBadge(code: number) {
-		if (code >= 500) return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400';
-		if (code >= 400) return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400';
-		return 'bg-neutral-100 text-neutral-600 dark:bg-white/5 dark:text-white/50';
+	function rateColor(rate: number): string {
+		const t = tc();
+		if (rate >= 80) return t.red;
+		if (rate >= 50) return t.orange;
+		if (rate >= 20) return t.yellow;
+		return theme.dark ? 'rgba(255,255,255,0.5)' : '#6b7280';
 	}
 
-	function statusColor(code: number) {
-		if (code >= 500) return 'text-red-600 dark:text-red-400';
-		if (code >= 400) return 'text-amber-600 dark:text-amber-400';
-		if (code >= 300) return 'text-blue-600 dark:text-blue-400';
-		return 'text-green-600 dark:text-green-400';
+	function rateBadgeStyle(rate: number): string {
+		const col = rateColor(rate);
+		if (rate < 20) return theme.dark
+			? 'color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.05)'
+			: 'color:#6b7280;background:#f5f5f5';
+		return `color:${col};background-color:${col}1a`;
 	}
+
+	function codeBadgeStyle(code: number): string {
+		const t = tc();
+		let col: string;
+		if (code >= 500) col = t.red;
+		else if (code >= 400) col = t.yellow;
+		else return theme.dark
+			? 'color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.05)'
+			: 'color:#6b7280;background:#f5f5f5';
+		return `color:${col};background-color:${col}1a`;
+	}
+
+	let selectedIpReport = $state<IpReport | null>(null);
+	let selectedPayload = $state<LargePayload | null>(null);
 
 	function logsLink(ip: string) {
 		return `/logs?ip=${encodeURIComponent(ip)}&status=4xx,5xx`;
@@ -196,7 +217,8 @@
 		<TimeRangeSelector onchange={fetchReport} />
 	</div>
 
-	<!-- Section: AI Analysis -->
+	<!-- Section: AI Analysis (admin only) -->
+	{#if auth.user?.is_admin}
 	<div class="space-y-3">
 		<div class="flex items-center gap-3">
 			<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-violet-500">
@@ -243,6 +265,7 @@
 			</div>
 		{/if}
 	</div>
+	{/if}
 
 	<!-- Section: High Error Rate IPs -->
 	<div class="space-y-3">
@@ -276,18 +299,22 @@
 							<th class="px-4 py-3"></th>
 						</tr>
 					</thead>
+					<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 					<tbody class="divide-y divide-neutral-100 dark:divide-white/5">
 						{#each data as row (row.ip)}
 							{@const rate = errorRate(row)}
-							<tr class="transition-colors hover:bg-neutral-50 dark:hover:bg-white/[0.03]">
+							<tr
+								class="cursor-pointer transition-colors hover:bg-neutral-50 dark:hover:bg-white/[0.03]"
+								onclick={() => selectedIpReport = row}
+							>
 								<td class="px-4 py-3">
 									<span class="font-mono text-xs {anonymize.on ? 'blur-sm select-none' : ''}">{row.ip}</span>
 								</td>
 								<td class="px-4 py-3 text-right font-mono text-xs text-neutral-500 dark:text-white/50">{row.total.toLocaleString()}</td>
-								<td class="px-4 py-3 text-right font-mono text-xs text-amber-600 dark:text-amber-400">{row.errors_4xx.toLocaleString()}</td>
-								<td class="px-4 py-3 text-right font-mono text-xs text-red-600 dark:text-red-400">{row.errors_5xx.toLocaleString()}</td>
+								<td class="px-4 py-3 text-right font-mono text-xs font-semibold" style="color:{tc().yellow}">{row.errors_4xx.toLocaleString()}</td>
+								<td class="px-4 py-3 text-right font-mono text-xs font-semibold" style="color:{tc().red}">{row.errors_5xx.toLocaleString()}</td>
 								<td class="px-4 py-3 text-right">
-									<span class="rounded-full px-2 py-0.5 text-xs font-semibold {rateBadgeBg(rate)}">
+									<span class="rounded-full px-2 py-0.5 text-xs font-semibold" style="{rateBadgeStyle(rate)}">
 										{rate.toFixed(1)}%
 									</span>
 								</td>
@@ -295,58 +322,23 @@
 									<div class="flex flex-wrap gap-1">
 										{#each row.top_endpoints.slice(0, 3) as ep}
 											<span class="inline-flex max-w-xs items-center gap-1 overflow-hidden rounded border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 dark:border-white/10 dark:bg-white/5">
-												<span class="shrink-0 text-xs font-semibold {methodColor(ep.method)}">{ep.method}</span>
-												<span class="truncate font-mono text-xs text-neutral-600 dark:text-white/60" title={ep.path}>{ep.path}</span>
+												<span class="shrink-0 text-xs font-semibold" style="color:{methodColor(ep.method)}">{ep.method}</span>
+												<span class="truncate font-mono text-xs text-neutral-600 dark:text-white/60 {anonymize.on ? 'blur-sm select-none' : ''}" title={anonymize.on ? '' : ep.path}>{ep.path}</span>
 												<span class="shrink-0 text-xs text-neutral-400 dark:text-white/30">×{ep.errors}</span>
 											</span>
 										{/each}
 										{#if row.top_endpoints.length > 3}
-											<button
-												onclick={() => expandedIp = expandedIp === row.ip ? null : row.ip}
-												class="rounded border border-neutral-200 px-1.5 py-0.5 text-xs text-neutral-400 hover:bg-neutral-100 dark:border-white/10 dark:text-white/30 dark:hover:bg-white/5"
-											>+{row.top_endpoints.length - 3} more</button>
+											<span class="rounded border border-neutral-200 px-1.5 py-0.5 text-xs text-neutral-400 dark:border-white/10 dark:text-white/30">+{row.top_endpoints.length - 3} more</span>
 										{/if}
 									</div>
 								</td>
-								<td class="px-4 py-3 text-right">
+								<td class="px-4 py-3 text-right" onclick={(e) => e.stopPropagation()}>
 									<a
 										href={logsLink(row.ip)}
 										class="inline-block whitespace-nowrap rounded border border-neutral-200 px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5"
 									>Logs →</a>
 								</td>
 							</tr>
-							{#if expandedIp === row.ip}
-								<tr class="bg-neutral-50 dark:bg-white/[0.02]">
-									<td colspan="7" class="px-4 pb-4 pt-1">
-										<table class="w-full text-xs">
-											<thead>
-												<tr class="text-left text-neutral-400 dark:text-white/30">
-													<th class="pb-1 pr-4 font-medium">Method</th>
-													<th class="pb-1 pr-4 font-medium">Endpoint</th>
-													<th class="pb-1 pr-4 text-right font-medium">Errors</th>
-													<th class="pb-1 font-medium">Status Codes</th>
-												</tr>
-											</thead>
-											<tbody class="divide-y divide-neutral-100 dark:divide-white/5">
-												{#each row.top_endpoints as ep}
-													<tr>
-														<td class="py-1.5 pr-4 font-semibold {methodColor(ep.method)}">{ep.method}</td>
-														<td class="py-1.5 pr-4 font-mono text-neutral-600 dark:text-white/60">{ep.path}</td>
-														<td class="py-1.5 pr-4 text-right font-mono text-neutral-500 dark:text-white/50">{ep.errors}</td>
-														<td class="py-1.5">
-															<div class="flex flex-wrap gap-1">
-																{#each ep.codes as [code, count]}
-																	<span class="rounded px-1.5 py-0.5 font-mono text-xs {codeBadge(code)}">{code} ×{count}</span>
-																{/each}
-															</div>
-														</td>
-													</tr>
-												{/each}
-											</tbody>
-										</table>
-									</td>
-								</tr>
-							{/if}
 						{/each}
 					</tbody>
 				</table>
@@ -382,13 +374,17 @@
 							<th class="px-4 py-3 font-medium text-neutral-500 dark:text-white/50">IP</th>
 						</tr>
 					</thead>
+					<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 					<tbody class="divide-y divide-neutral-100 dark:divide-white/5">
 						{#each payloads as row}
-							<tr class="transition-colors hover:bg-neutral-50 dark:hover:bg-white/[0.03]">
+							<tr
+								class="cursor-pointer transition-colors hover:bg-neutral-50 dark:hover:bg-white/[0.03]"
+								onclick={() => selectedPayload = row}
+							>
 								<td class="px-4 py-2 font-mono text-xs text-neutral-500 dark:text-white/50">{new Date(row.ts * 1000).toLocaleString()}</td>
-								<td class="px-4 py-2 font-mono text-xs font-semibold {methodColor(row.method)}">{row.method}</td>
-								<td class="max-w-xs truncate px-4 py-2 font-mono text-xs text-neutral-600 dark:text-white/70" title="{row.host}{row.uri}">{row.host}{row.uri}</td>
-								<td class="px-4 py-2 text-right font-mono text-xs font-semibold {statusColor(row.status)}">{row.status}</td>
+								<td class="px-4 py-2 font-mono text-xs font-semibold" style="color:{methodColor(row.method)}">{row.method}</td>
+								<td class="max-w-xs truncate px-4 py-2 font-mono text-xs text-neutral-600 dark:text-white/70 {anonymize.on ? 'blur-sm select-none' : ''}" title={anonymize.on ? '' : `${row.host}${row.uri}`}>{row.host}{row.uri}</td>
+								<td class="px-4 py-2 text-right font-mono text-xs font-semibold" style="color:{statusColor(row.status)}">{row.status}</td>
 								<td class="px-4 py-2 text-right font-mono text-xs font-semibold text-neutral-700 dark:text-white/80">{formatBytes(row.size)}</td>
 								<td class="px-4 py-2 text-right font-mono text-xs text-neutral-500 dark:text-white/50">{formatDuration(row.duration)}</td>
 								<td class="px-4 py-2 font-mono text-xs {anonymize.on ? 'blur-sm select-none' : ''} text-neutral-400 dark:text-white/40">{row.ip}</td>
@@ -400,6 +396,136 @@
 		{/if}
 	</div>
 </div>
+
+<!-- IP Report Modal -->
+{#if selectedIpReport}
+	{@const row = selectedIpReport}
+	{@const rate = errorRate(row)}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+		onclick={(e) => { if (e.target === e.currentTarget) selectedIpReport = null; }}
+	>
+		<div class="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-white/10 dark:bg-neutral-900">
+			<div class="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-white/10">
+				<div class="flex items-center gap-3">
+					<span class="font-mono text-sm font-semibold {anonymize.on ? 'blur-sm select-none' : ''}">{row.ip}</span>
+					<span class="rounded-full px-2 py-0.5 text-xs font-semibold" style="{rateBadgeStyle(rate)}">{rate.toFixed(1)}% error rate</span>
+				</div>
+				<div class="flex items-center gap-2">
+					<a
+						href={logsLink(row.ip)}
+						class="inline-block whitespace-nowrap rounded-lg border border-neutral-200 px-3 py-1.5 text-xs text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5"
+					>View Logs →</a>
+					<button onclick={() => selectedIpReport = null} aria-label="Close" class="rounded-lg border border-neutral-200 p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+					</button>
+				</div>
+			</div>
+			<div class="flex-1 overflow-y-auto p-5 space-y-4 text-sm">
+				<div class="grid grid-cols-4 gap-3">
+					<div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-center dark:border-white/10 dark:bg-white/[0.03]">
+						<div class="text-lg font-semibold font-mono">{row.total.toLocaleString()}</div>
+						<div class="text-xs text-neutral-500 dark:text-white/40">Total</div>
+					</div>
+					<div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-center dark:border-white/10 dark:bg-white/[0.03]">
+						<div class="text-lg font-semibold font-mono" style="color:{tc().yellow}">{row.errors_4xx.toLocaleString()}</div>
+						<div class="text-xs text-neutral-500 dark:text-white/40">4xx errors</div>
+					</div>
+					<div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-center dark:border-white/10 dark:bg-white/[0.03]">
+						<div class="text-lg font-semibold font-mono" style="color:{tc().red}">{row.errors_5xx.toLocaleString()}</div>
+						<div class="text-xs text-neutral-500 dark:text-white/40">5xx errors</div>
+					</div>
+					<div class="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-center dark:border-white/10 dark:bg-white/[0.03]">
+						<div class="text-lg font-semibold font-mono" style="color:{rateColor(rate)}">{rate.toFixed(1)}%</div>
+						<div class="text-xs text-neutral-500 dark:text-white/40">Error rate</div>
+					</div>
+				</div>
+				<section>
+					<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-400 dark:text-white/30">Error Endpoints</h3>
+					<div class="overflow-hidden rounded-lg border border-neutral-200 dark:border-white/10">
+						<table class="w-full text-xs">
+							<thead>
+								<tr class="border-b border-neutral-200 bg-neutral-50 text-left dark:border-white/10 dark:bg-white/5">
+									<th class="px-3 py-2 font-medium text-neutral-500 dark:text-white/40">Method</th>
+									<th class="px-3 py-2 font-medium text-neutral-500 dark:text-white/40">Endpoint</th>
+									<th class="px-3 py-2 text-right font-medium text-neutral-500 dark:text-white/40">Errors</th>
+									<th class="px-3 py-2 font-medium text-neutral-500 dark:text-white/40">Status Codes</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-neutral-100 dark:divide-white/5">
+								{#each row.top_endpoints as ep}
+									<tr class="bg-white dark:bg-neutral-900">
+										<td class="px-3 py-2 font-semibold" style="color:{methodColor(ep.method)}">{ep.method}</td>
+										<td class="px-3 py-2 font-mono text-neutral-600 dark:text-white/60 {anonymize.on ? 'blur-sm select-none' : ''}">{ep.path}</td>
+										<td class="px-3 py-2 text-right font-mono text-neutral-500 dark:text-white/50">{ep.errors}</td>
+										<td class="px-3 py-2">
+											<div class="flex flex-wrap gap-1">
+												{#each ep.codes as [code, count]}
+													<span class="rounded px-1.5 py-0.5 font-mono" style="{codeBadgeStyle(code)}">{code} ×{count}</span>
+												{/each}
+											</div>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				</section>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<!-- Payload Detail Modal -->
+{#if selectedPayload}
+	{@const row = selectedPayload}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+		onclick={(e) => { if (e.target === e.currentTarget) selectedPayload = null; }}
+	>
+		<div class="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-white/10 dark:bg-neutral-900">
+			<div class="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-white/10">
+				<div class="flex items-center gap-3 min-w-0">
+					<span class="shrink-0 font-mono font-semibold" style="color:{methodColor(row.method)}">{row.method}</span>
+					<span class="shrink-0 font-mono font-bold" style="color:{statusColor(row.status)}">{row.status}</span>
+					<span class="truncate font-mono text-sm text-neutral-500 dark:text-white/50 {anonymize.on ? 'blur-sm select-none' : ''}">{row.host}{row.uri}</span>
+				</div>
+				<button onclick={() => selectedPayload = null} aria-label="Close" class="ml-4 shrink-0 rounded-lg border border-neutral-200 p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+				</button>
+			</div>
+			<div class="flex-1 overflow-y-auto p-5 text-sm">
+				<div class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 rounded-lg border border-neutral-200 bg-neutral-50 p-4 font-mono text-xs dark:border-white/10 dark:bg-white/[0.03]">
+					<span class="text-neutral-400 dark:text-white/30">Time</span>
+					<span>{new Date(row.ts * 1000).toLocaleString()}</span>
+
+					<span class="text-neutral-400 dark:text-white/30">Host</span>
+					<span class="{anonymize.on ? 'blur-sm select-none' : ''}">{row.host}</span>
+
+					<span class="text-neutral-400 dark:text-white/30">URI</span>
+					<span class="{anonymize.on ? 'blur-sm select-none' : ''}">{row.uri}</span>
+
+					<span class="text-neutral-400 dark:text-white/30">Method</span>
+					<span class="font-semibold" style="color:{methodColor(row.method)}">{row.method}</span>
+
+					<span class="text-neutral-400 dark:text-white/30">Status</span>
+					<span class="font-semibold" style="color:{statusColor(row.status)}">{row.status}</span>
+
+					<span class="text-neutral-400 dark:text-white/30">Response size</span>
+					<span class="font-semibold">{formatBytes(row.size)}</span>
+
+					<span class="text-neutral-400 dark:text-white/30">Duration</span>
+					<span>{formatDuration(row.duration)}</span>
+
+					<span class="text-neutral-400 dark:text-white/30">Client IP</span>
+					<span class="{anonymize.on ? 'blur-sm select-none' : ''}">{row.ip}</span>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	:global(.ai-output h1, .ai-output h2, .ai-output h3) {

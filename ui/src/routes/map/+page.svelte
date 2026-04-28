@@ -3,10 +3,18 @@
 	import { COUNTRY_COORDS } from '$lib/countries';
 	import { timeRange } from '$lib/time-range.svelte';
 	import TimeRangeSelector from '$lib/components/TimeRangeSelector.svelte';
+	import { anonymize } from '$lib/anonymize.svelte';
 	import type { Map, CircleMarker } from 'leaflet';
 
-	interface CountryCount { country: string; count: number; }
+	interface CountryCount { country: string; count: number; top_ips: string[]; }
+	interface PrecisePoint { lat: number; lng: number; count: number; top_ips: string[]; }
 	type GeoMode = 'country' | 'cluster';
+
+	interface SelectedPoint {
+		label: string;
+		count: number;
+		ips: string[];
+	}
 
 	let L: typeof import('leaflet') | null = null;
 	let mapEl = $state<HTMLDivElement | null>(null);
@@ -18,6 +26,7 @@
 	let error = $state('');
 	let mode = $state<GeoMode>('country');
 	let noGeoip = $state(false);
+	let selectedPoint = $state<SelectedPoint | null>(null);
 
 	function clusterIcon(count: number) {
 		const size = Math.round(Math.min(56, 28 + Math.log1p(count) * 4));
@@ -42,7 +51,10 @@
 			if (since) params.set('since', since);
 			if (m === 'cluster') params.set('mode', 'precise');
 			const res = await fetch(`/api/geo${params.size ? `?${params}` : ''}`);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			if (!res.ok) {
+				const d = await res.json().catch(() => ({}));
+				throw new Error(d.error ?? `HTTP ${res.status}`);
+			}
 			const json = await res.json();
 
 			markers.forEach((mk) => mk.remove());
@@ -50,7 +62,7 @@
 			if (clusterGroup) { leafletMap!.removeLayer(clusterGroup); clusterGroup = null; }
 
 			if (json.mode === 'precise') {
-				const raw: [number, number, number][] = json.points;
+				const raw: PrecisePoint[] = json.points;
 				if (raw.length > 0) {
 					clusterGroup = L.markerClusterGroup({
 						maxClusterRadius: 60,
@@ -63,16 +75,24 @@
 						showCoverageOnHover: false
 					});
 
-					for (const [lat, lng, weight] of raw) {
-						const w = Math.round(weight);
+					for (const pt of raw) {
+						const w = pt.count;
 						const r = Math.min(18, 6 + Math.log1p(w) * 2);
-						const mk: any = L.circleMarker([lat, lng], {
+						const mk: any = L.circleMarker([pt.lat, pt.lng], {
 							radius: r,
 							color: '#2563eb',
 							fillColor: '#3b82f6',
 							fillOpacity: 0.75,
 							weight: 1.5
-						}).bindTooltip(`${w.toLocaleString()} requests`);
+						})
+							.bindTooltip(`${w.toLocaleString()} requests`)
+							.on('click', () => {
+								selectedPoint = {
+									label: `${pt.lat.toFixed(2)}, ${pt.lng.toFixed(2)}`,
+									count: w,
+									ips: pt.top_ips
+								};
+							});
 						mk._weight = w;
 						clusterGroup.addLayer(mk);
 					}
@@ -82,7 +102,7 @@
 			} else {
 				data = json.data ?? [];
 				const maxCount = Math.max(...data.map((d) => d.count), 1);
-				for (const { country, count } of data) {
+				for (const { country, count, top_ips } of data) {
 					const coords = COUNTRY_COORDS[country];
 					if (!coords) continue;
 					const marker = L!.circleMarker(coords, {
@@ -90,6 +110,9 @@
 						color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.5, weight: 1
 					})
 						.bindTooltip(`<strong>${country}</strong><br/>${count.toLocaleString()} requests`)
+						.on('click', () => {
+							selectedPoint = { label: country, count, ips: top_ips };
+						})
 						.addTo(leafletMap!);
 					markers.push(marker);
 				}
@@ -187,3 +210,44 @@
 		</div>
 	{/if}
 </div>
+
+<!-- Point / Country IP Modal -->
+{#if selectedPoint}
+	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+		onclick={(e) => { if (e.target === e.currentTarget) selectedPoint = null; }}
+	>
+		<div class="flex max-h-[70vh] w-full max-w-sm flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-white/10 dark:bg-neutral-900">
+			<div class="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-white/10">
+				<div>
+					<div class="font-semibold">{selectedPoint.label}</div>
+					<div class="text-xs text-neutral-500 dark:text-white/40">{selectedPoint.count.toLocaleString()} requests</div>
+				</div>
+				<button onclick={() => selectedPoint = null} aria-label="Close" class="rounded-lg border border-neutral-200 p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+				</button>
+			</div>
+			<div class="flex-1 overflow-y-auto p-4">
+				{#if selectedPoint.ips.length === 0}
+					<p class="text-center text-sm text-neutral-400 dark:text-white/30">No IP data available</p>
+				{:else}
+					<p class="mb-2 text-xs text-neutral-400 dark:text-white/30">Top IPs (up to 10)</p>
+					<ul class="space-y-1">
+						{#each selectedPoint.ips as ip}
+							<li>
+								<a
+									href="/logs?ip={encodeURIComponent(ip)}"
+									class="flex items-center justify-between rounded-lg border border-neutral-100 px-3 py-2 font-mono text-sm hover:bg-neutral-50 dark:border-white/5 dark:hover:bg-white/5"
+								>
+									<span class="{anonymize.on ? 'blur-sm select-none' : ''}">{ip}</span>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-neutral-400 dark:text-white/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+								</a>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
+		</div>
+	</div>
+{/if}

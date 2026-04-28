@@ -5,7 +5,8 @@
 	"type": "module",
 	"packageManager": "bun@1.2.0",
 	"scripts": {
-		"dev": "rm -rf .svelte-kit && vite dev --force",
+		"dev": "vite dev",
+		"dev:clean": "rm -rf .svelte-kit node_modules/.vite && vite dev --force",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",

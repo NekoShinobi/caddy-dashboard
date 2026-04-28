@@ -33,7 +33,10 @@ struct Stats {
 
 #[get("/stats")]
 async fn get_stats(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let all = crate::db::load_entries(&db);
+    let all = match crate::db::load_entries(&db) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
+    };
     let entries: Vec<_> = match query.since {
         Some(since) => all.into_iter().filter(|e| e.ts >= since).collect(),
         None => all,

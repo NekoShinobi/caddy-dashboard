@@ -1,20 +1,41 @@
-use actix_web::{get, web, HttpResponse};
+use actix_web::{get, web, HttpRequest, HttpResponse};
 use futures_util::{stream, StreamExt};
 use redb::Database;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-fn build_prompt(db: &Database) -> String {
-    let all = crate::db::load_entries(db);
+#[derive(Deserialize)]
+struct Query {
+    since: Option<f64>,
+}
+
+pub const SETTING_KEY: &str = "ai_prompt_template";
+
+pub const DEFAULT_PROMPT_TEMPLATE: &str = "\
+You are a security-aware web traffic analyst. Analyze the following 24-hour \
+Caddy access log summary. Provide:
+1. A concise assessment (3-5 bullet points) flagging anything suspicious or \
+anomalous. If traffic looks normal, say so briefly.
+2. A short **Action Items** section listing concrete steps the operator should \
+consider based on what you found.
+
+Use markdown formatting.
+
+{summary}
+
+Provide your analysis and action items:";
+
+fn build_prompt(db: &Database, since: Option<f64>) -> Result<String, &'static str> {
+    let all = crate::db::load_entries(db).map_err(|_| "Database error")?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs_f64();
-    let cutoff = now - 86400.0;
+    let cutoff = since.unwrap_or(now - 86400.0);
     let entries: Vec<_> = all.into_iter().filter(|e| e.ts >= cutoff).collect();
 
     if entries.is_empty() {
-        return "No log entries found in the last 24 hours.".into();
+        return Err("No log entries found in the last 24 hours.");
     }
 
     let total = entries.len();
@@ -102,40 +123,32 @@ fn build_prompt(db: &Database) -> String {
         .map(|(ua, c)| format!("  {} ... ({})", ua, c))
         .collect();
 
-    format!(
-        r#"You are a security-aware web traffic analyst. Analyze the following 24-hour Caddy access log summary. Provide:
-1. A concise assessment (3-5 bullet points) flagging anything suspicious or anomalous. If traffic looks normal, say so briefly.
-2. A short **Action Items** section listing concrete steps the operator should consider based on what you found.
-
-Use markdown formatting.
-
-=== 24-HOUR TRAFFIC SUMMARY ===
-Total requests: {total}
-Unique IPs: {unique_ips}
-
-Status breakdown:
-  2xx (success):   {s2xx}
-  3xx (redirect):  {s3xx}
-  4xx (client err): {s4xx}
-  5xx (server err): {s5xx}
-
-Requests by hour (oldest → newest):
-{hourly}
-
-Top paths by volume:
-{top_paths}
-
-Top IPs by request count (with error rates):
-{top_ips}
-
-Top error paths (4xx/5xx):
-{top_error_paths}
-
-Top user agents:
-{top_uas}
-=== END SUMMARY ===
-
-Provide your analysis and action items:"#,
+    let summary = format!(
+        "=== 24-HOUR TRAFFIC SUMMARY ===\n\
+Total requests: {total}\n\
+Unique IPs: {unique_ips}\n\
+\n\
+Status breakdown:\n\
+  2xx (success):    {s2xx}\n\
+  3xx (redirect):   {s3xx}\n\
+  4xx (client err): {s4xx}\n\
+  5xx (server err): {s5xx}\n\
+\n\
+Requests by hour (oldest → newest):\n\
+{hourly}\n\
+\n\
+Top paths by volume:\n\
+{top_paths}\n\
+\n\
+Top IPs by request count (with error rates):\n\
+{top_ips}\n\
+\n\
+Top error paths (4xx/5xx):\n\
+{top_error_paths}\n\
+\n\
+Top user agents:\n\
+{top_uas}\n\
+=== END SUMMARY ===",
         total = total,
         unique_ips = ip_counts.len(),
         hourly = hourly.join("\n"),
@@ -143,7 +156,12 @@ Provide your analysis and action items:"#,
         top_ips = top_ips.join("\n"),
         top_error_paths = if top_error_paths.is_empty() { "  (none)".into() } else { top_error_paths.join("\n") },
         top_uas = top_uas.join("\n"),
-    )
+    );
+
+    let template = crate::db::get_setting(db, SETTING_KEY)
+        .unwrap_or_else(|| DEFAULT_PROMPT_TEMPLATE.to_string());
+
+    Ok(template.replace("{summary}", &summary))
 }
 
 #[derive(Deserialize)]
@@ -173,8 +191,32 @@ struct OllamaRequestMessage {
 }
 
 #[get("/reports/ai-analysis")]
-pub async fn get_ai_analysis(db: web::Data<Database>) -> HttpResponse {
-    let prompt = web::block(move || build_prompt(&db)).await.unwrap_or_default();
+pub async fn get_ai_analysis(req: HttpRequest, db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
+    let username = match crate::session::get_username(&req, &db) {
+        Some(u) => u,
+        None => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"})),
+    };
+    let user = match crate::db::get_user(&db, &username) {
+        Some(u) => u,
+        None => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"})),
+    };
+    if !user.is_admin {
+        return HttpResponse::Forbidden().json(serde_json::json!({"error": "Admin required"}));
+    }
+
+    let since = query.since;
+    let prompt = match web::block(move || build_prompt(&db, since)).await {
+        Ok(Ok(p)) => p,
+        Ok(Err(msg)) => {
+            return HttpResponse::UnprocessableEntity()
+                .json(serde_json::json!({"error": msg}));
+        }
+        Err(e) => {
+            log::error!("get_ai_analysis: build_prompt panicked: {e}");
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Internal error"}));
+        }
+    };
 
     let host = crate::env::OLLAMA_HOST.trim_end_matches('/').to_string();
     let model = crate::env::OLLAMA_MODEL.clone();
@@ -186,8 +228,6 @@ pub async fn get_ai_analysis(db: web::Data<Database>) -> HttpResponse {
         stream: true,
     };
 
-    log::info!("Ollama request body: {}", serde_json::to_string(&body).unwrap_or_default());
-
     let res = client
         .post(format!("{host}/api/chat"))
         .json(&body)
@@ -198,20 +238,32 @@ pub async fn get_ai_analysis(db: web::Data<Database>) -> HttpResponse {
         Ok(r) if r.status().is_success() => r,
         Ok(r) => {
             let status = r.status();
-            return HttpResponse::BadGateway().body(format!("Ollama error: HTTP {status}"));
+            log::error!("get_ai_analysis: Ollama returned HTTP {status}");
+            return HttpResponse::BadGateway()
+                .json(serde_json::json!({"error": format!("Ollama error: HTTP {status}")}));
         }
         Err(e) => {
+            log::error!("get_ai_analysis: cannot reach Ollama at {host}: {e}");
             return HttpResponse::BadGateway()
-                .body(format!("Cannot reach Ollama at {host}: {e}"));
+                .json(serde_json::json!({"error": format!("Cannot reach Ollama at {host}: {e}")}));
         }
     };
 
     let byte_stream = resp.bytes_stream().map(|chunk| {
         let bytes = match chunk {
             Ok(b) => b,
-            Err(_) => return Ok(web::Bytes::from("data: {\"done\":true}\n\n")),
+            Err(e) => {
+                log::error!("get_ai_analysis: stream read error: {e}");
+                return Ok(web::Bytes::from("data: {\"done\":true}\n\n"));
+            }
         };
-        let line = std::str::from_utf8(&bytes).unwrap_or("").trim().to_string();
+        let line = match std::str::from_utf8(&bytes) {
+            Ok(s) => s.trim().to_string(),
+            Err(e) => {
+                log::error!("get_ai_analysis: non-UTF8 chunk from Ollama: {e}");
+                return Ok(web::Bytes::new());
+            }
+        };
         if line.is_empty() {
             return Ok(web::Bytes::new());
         }
@@ -219,6 +271,7 @@ pub async fn get_ai_analysis(db: web::Data<Database>) -> HttpResponse {
             Ok(chunk) if chunk.done => "data: {\"done\":true}\n\n".to_string(),
             Ok(chunk) => {
                 if let Some(err) = chunk.error {
+                    log::error!("get_ai_analysis: Ollama reported error: {err}");
                     format!("data: {{\"error\":{}}}\n\n", serde_json::to_string(&err).unwrap_or_default())
                 } else if let Some(msg) = chunk.message {
                     if !msg.content.is_empty() {
@@ -231,7 +284,10 @@ pub async fn get_ai_analysis(db: web::Data<Database>) -> HttpResponse {
                     String::new()
                 }
             }
-            Err(_) => String::new(),
+            Err(e) => {
+                log::error!("get_ai_analysis: failed to parse Ollama chunk '{line}': {e}");
+                String::new()
+            }
         };
         Ok::<_, actix_web::Error>(web::Bytes::from(sse))
     });

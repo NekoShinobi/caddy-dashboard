@@ -60,12 +60,18 @@ impl BucketAccum {
 
 #[get("/timeline")]
 async fn get_timeline(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let all = crate::db::load_entries(&db);
-
-    let (bucket_secs, window_secs): (u64, u64) = match query.bucket.as_deref().unwrap_or("hour") {
+    let bucket_str = query.bucket.as_deref().unwrap_or("hour");
+    let (bucket_secs, window_secs): (u64, u64) = match bucket_str {
         "minute" => (60,    3_600),
+        "hour"   => (3600,  86_400),
         "day"    => (86400, 2_592_000),
-        _        => (3600,  86_400),
+        _ => return HttpResponse::BadRequest()
+            .json(serde_json::json!({"error": "Invalid bucket. Valid values: minute, hour, day"})),
+    };
+
+    let all = match crate::db::load_entries(&db) {
+        Ok(v) => v,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
     };
 
     let now_secs = std::time::SystemTime::now()

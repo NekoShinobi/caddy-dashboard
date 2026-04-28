@@ -6,6 +6,10 @@ export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
 		host: '0.0.0.0',
+		allowedHosts: true,
+		hmr: {
+			clientPort: 443
+		},
 		headers: {
 			'Cache-Control': 'no-store'
 		},

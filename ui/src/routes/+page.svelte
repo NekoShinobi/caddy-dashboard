@@ -43,7 +43,10 @@
 			const since = timeRange.sinceParam();
 			const url = since ? `/api/stats?since=${since}` : '/api/stats';
 			const res = await fetch(url);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			if (!res.ok) {
+				const d = await res.json().catch(() => ({}));
+				throw new Error(d.error ?? `HTTP ${res.status}`);
+			}
 			stats = await res.json();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to fetch stats';

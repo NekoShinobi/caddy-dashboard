@@ -1,11 +1,15 @@
 use simplelog::{ColorChoice, CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode};
 use tokio::sync::broadcast;
 
+mod auth;
 mod db;
 mod env;
 mod geoip;
 mod ingest;
 mod log_parser;
+mod login_throttle;
+mod oidc;
+mod session;
 mod web;
 
 #[tokio::main]
@@ -20,6 +24,13 @@ async fn main() -> miette::Result<()> {
 
     log::info!("opening database at {}", *env::DATA_DIR);
     let db = db::open(&env::DATA_DIR);
+
+    if std::env::var("USER_DATABASE_RESET").map(|v| v == "true" || v == "1").unwrap_or(false) {
+        match db::reset_users(&db) {
+            Ok(()) => log::warn!("USER_DATABASE_RESET: all users and sessions wiped — remove the env var and create a new admin account"),
+            Err(e) => log::error!("USER_DATABASE_RESET: failed to reset user database: {e}"),
+        }
+    }
 
     let (tx, _) = broadcast::channel::<log_parser::LogEntry>(1024);
 
