@@ -88,3 +88,10 @@ pub static OIDC_DISABLE_LOGIN: LazyLock<bool> = LazyLock::new(|| {
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false)
 });
+
+/// When false, skip the email_verified claim check (useful for providers that don't set it reliably).
+pub static OIDC_REQUIRE_EMAIL_VERIFIED: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("OIDC_REQUIRE_EMAIL_VERIFIED")
+        .map(|v| v.to_lowercase() != "false")
+        .unwrap_or(true)
+});

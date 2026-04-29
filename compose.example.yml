@@ -43,6 +43,9 @@ services:
       # Disable the local username/password login form and API endpoint.
       # Users can still be created/managed via the admin panel.
       # - OIDC_DISABLE_LOGIN=false
+      #
+      # Set false if your provider doesn't send email_verified reliably (e.g. Authentik).
+      # - OIDC_REQUIRE_EMAIL_VERIFIED=true
 
       # ── Emergency recovery ──────────────────────────────────────────────────
       # Wipe all users and sessions on next startup (remove after use).

@@ -121,19 +121,26 @@ fn apply_filters(
         });
     }
     if let Some(ref s) = query.not_status {
-        entries.retain(|e| !match_status(s, e.status));
+        let vals: Vec<&str> = s.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        entries.retain(|e| vals.iter().all(|v| !match_status(v, e.status)));
     }
     if let Some(ref h) = query.not_host {
-        entries.retain(|e| !e.request.host.contains(h.as_str()));
+        let vals: Vec<&str> = h.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        entries.retain(|e| vals.iter().all(|v| !e.request.host.contains(v)));
     }
     if let Some(ref m) = query.not_method {
-        entries.retain(|e| !e.request.method.eq_ignore_ascii_case(m));
+        let vals: Vec<&str> = m.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        entries.retain(|e| vals.iter().all(|v| !e.request.method.eq_ignore_ascii_case(v)));
     }
     if let Some(ref ip) = query.not_ip {
-        entries.retain(|e| !e.request.client_ip.contains(ip.as_str()) && !e.request.remote_ip.contains(ip.as_str()));
+        let vals: Vec<&str> = ip.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        entries.retain(|e| vals.iter().all(|v| {
+            !e.request.client_ip.contains(v) && !e.request.remote_ip.contains(v)
+        }));
     }
     if let Some(ref p) = query.not_path {
-        entries.retain(|e| !glob_match(p, &e.request.uri));
+        let vals: Vec<&str> = p.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        entries.retain(|e| vals.iter().all(|v| !glob_match(v, &e.request.uri)));
     }
     entries.sort_unstable_by(|a, b| b.ts.partial_cmp(&a.ts).unwrap_or(std::cmp::Ordering::Equal));
     entries

@@ -95,11 +95,12 @@
 			const val = t.slice(colon + 1);
 			if (!val) continue;
 			if (neg) {
-				if      (key === 'status')  f.not_status  = val;
-				else if (key === 'host')    f.not_host    = val;
-				else if (key === 'method')  f.not_method  = val;
-				else if (key === 'ip')      f.not_ip      = val;
-				else if (key === 'path')    f.not_path    = val;
+				const append = (cur: string | undefined, v: string) => cur ? `${cur},${v}` : v;
+				if      (key === 'status')  f.not_status  = append(f.not_status, val);
+				else if (key === 'host')    f.not_host    = append(f.not_host, val);
+				else if (key === 'method')  f.not_method  = append(f.not_method, val);
+				else if (key === 'ip')      f.not_ip      = append(f.not_ip, val);
+				else if (key === 'path')    f.not_path    = append(f.not_path, val);
 			} else {
 				if      (key === 'status')  f.status  = val;
 				else if (key === 'host')    f.host    = val;
@@ -334,7 +335,7 @@
 						{#each [
 							['-status:200', 'exclude status 200'],
 							['-ip:1.2.3.4', 'exclude an IP'],
-							['-host:cdn.example.com', 'exclude a host'],
+							['-host:cdn.example.com,api.example.com', 'exclude multiple hosts'],
 							['-method:GET', 'exclude GET requests'],
 							['-path:/healthz', 'exclude a path'],
 							['-path:/static/*', 'exclude a path glob'],

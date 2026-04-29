@@ -137,10 +137,12 @@ pub async fn callback(
         }
     };
 
-    // Reject explicitly unverified emails; absent claim is treated as verified
-    if let Some(false) = userinfo.email_verified {
-        log::warn!("OIDC callback: unverified email for sub={}", userinfo.sub);
-        return redirect_error("email_not_verified");
+    // Reject explicitly unverified emails unless the check is disabled via env
+    if *crate::env::OIDC_REQUIRE_EMAIL_VERIFIED {
+        if let Some(false) = userinfo.email_verified {
+            log::warn!("OIDC callback: unverified email for sub={}", userinfo.sub);
+            return redirect_error("email_not_verified");
+        }
     }
 
     let email = match userinfo.email.as_deref() {
