@@ -35,23 +35,28 @@
 	let loading = $state(true);
 	let error = $state('');
 	let autoRefresh = $state(true);
+	let requestController: AbortController | null = null;
 
 	async function fetchStats() {
+		requestController?.abort();
+		const controller = new AbortController();
+		requestController = controller;
 		loading = true;
 		error = '';
 		try {
-			const since = timeRange.sinceParam();
-			const url = since ? `/api/stats?since=${since}` : '/api/stats';
-			const res = await fetch(url);
+			const res = await fetch(`/api/stats?range=${timeRange.seconds}`, {
+				signal: controller.signal
+			});
 			if (!res.ok) {
 				const d = await res.json().catch(() => ({}));
 				throw new Error(d.error ?? `HTTP ${res.status}`);
 			}
 			stats = await res.json();
 		} catch (e) {
+			if (e instanceof DOMException && e.name === 'AbortError') return;
 			error = e instanceof Error ? e.message : 'Failed to fetch stats';
 		} finally {
-			loading = false;
+			if (requestController === controller) loading = false;
 		}
 	}
 
@@ -89,7 +94,10 @@
 	onMount(() => {
 		fetchStats();
 		const interval = setInterval(() => { if (autoRefresh) fetchStats(); }, 30000);
-		return () => clearInterval(interval);
+		return () => {
+			clearInterval(interval);
+			requestController?.abort();
+		};
 	});
 
 </script>

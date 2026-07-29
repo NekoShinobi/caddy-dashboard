@@ -1,7 +1,8 @@
-use actix_web::{get, web, HttpResponse};
+use actix_web::{HttpResponse, get, web};
 use futures_util::stream;
 use redb::Database;
 use serde::Deserialize;
+use std::time::Instant;
 use tokio::sync::broadcast;
 
 /// Match `text` against `pattern` where `*` matches any sequence of characters.
@@ -53,10 +54,11 @@ fn match_status(filter: &str, code: u16) -> bool {
     })
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Query {
     page: Option<usize>,
     limit: Option<usize>,
+    cursor: Option<u64>,
     status: Option<String>,
     host: Option<String>,
     method: Option<String>,
@@ -75,75 +77,148 @@ struct Query {
     not_path: Option<String>,
 }
 
-fn apply_filters(
-    mut entries: Vec<crate::log_parser::LogEntry>,
-    query: &Query,
-) -> Vec<crate::log_parser::LogEntry> {
+fn entry_matches(entry: &crate::log_parser::LogEntry, query: &Query) -> bool {
     if let Some(ref status) = query.status {
-        entries.retain(|e| match_status(status, e.status));
+        if !match_status(status, entry.status) {
+            return false;
+        }
     }
     if let Some(ref host) = query.host {
-        entries.retain(|e| e.request.host.contains(host.as_str()));
+        if !entry.request.host.contains(host.as_str()) {
+            return false;
+        }
     }
     if let Some(ref method) = query.method {
-        entries.retain(|e| e.request.method.eq_ignore_ascii_case(method));
+        if !entry.request.method.eq_ignore_ascii_case(method) {
+            return false;
+        }
     }
     if let Some(ref ip) = query.ip {
-        entries.retain(|e| e.request.client_ip.contains(ip.as_str()) || e.request.remote_ip.contains(ip.as_str()));
+        if !entry.request.client_ip.contains(ip.as_str())
+            && !entry.request.remote_ip.contains(ip.as_str())
+        {
+            return false;
+        }
     }
     if let Some(ref path) = query.path {
-        entries.retain(|e| glob_match(path, &e.request.uri));
+        if !glob_match(path, &entry.request.uri) {
+            return false;
+        }
     }
     if let Some(ref ua) = query.ua {
         let ua_lower = ua.to_lowercase();
-        entries.retain(|e| {
-            e.request.headers.get("User-Agent")
-                .and_then(|v| v.first())
-                .map(|v| v.to_lowercase().contains(&ua_lower))
-                .unwrap_or(false)
-        });
+        let matches = entry
+            .request
+            .headers
+            .get("User-Agent")
+            .and_then(|values| values.first())
+            .map(|value| value.to_lowercase().contains(&ua_lower))
+            .unwrap_or(false);
+        if !matches {
+            return false;
+        }
     }
     if let Some(gt) = query.duration_gt {
-        entries.retain(|e| e.duration >= gt / 1000.0);
+        if entry.duration < gt / 1000.0 {
+            return false;
+        }
     }
     if let Some(gt) = query.size_gt {
-        entries.retain(|e| e.size > gt);
+        if entry.size <= gt {
+            return false;
+        }
     }
     if let Some(lt) = query.size_lt {
-        entries.retain(|e| e.size < lt);
+        if entry.size >= lt {
+            return false;
+        }
     }
     if let Some(ref text) = query.text {
         let t = text.to_lowercase();
-        entries.retain(|e| {
-            e.request.uri.to_lowercase().contains(&t)
-                || e.request.host.to_lowercase().contains(&t)
-                || e.request.client_ip.contains(t.as_str())
-        });
+        if !entry.request.uri.to_lowercase().contains(&t)
+            && !entry.request.host.to_lowercase().contains(&t)
+            && !entry.request.client_ip.contains(t.as_str())
+        {
+            return false;
+        }
     }
     if let Some(ref s) = query.not_status {
-        let vals: Vec<&str> = s.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        entries.retain(|e| vals.iter().all(|v| !match_status(v, e.status)));
+        if s.split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .any(|value| match_status(value, entry.status))
+        {
+            return false;
+        }
     }
     if let Some(ref h) = query.not_host {
-        let vals: Vec<&str> = h.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        entries.retain(|e| vals.iter().all(|v| !e.request.host.contains(v)));
+        if h.split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .any(|value| entry.request.host.contains(value))
+        {
+            return false;
+        }
     }
     if let Some(ref m) = query.not_method {
-        let vals: Vec<&str> = m.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        entries.retain(|e| vals.iter().all(|v| !e.request.method.eq_ignore_ascii_case(v)));
+        if m.split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .any(|value| entry.request.method.eq_ignore_ascii_case(value))
+        {
+            return false;
+        }
     }
     if let Some(ref ip) = query.not_ip {
-        let vals: Vec<&str> = ip.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        entries.retain(|e| vals.iter().all(|v| {
-            !e.request.client_ip.contains(v) && !e.request.remote_ip.contains(v)
-        }));
+        if ip
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .any(|value| {
+                entry.request.client_ip.contains(value) || entry.request.remote_ip.contains(value)
+            })
+        {
+            return false;
+        }
     }
     if let Some(ref p) = query.not_path {
-        let vals: Vec<&str> = p.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        entries.retain(|e| vals.iter().all(|v| !glob_match(v, &e.request.uri)));
+        if p.split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .any(|value| glob_match(value, &entry.request.uri))
+        {
+            return false;
+        }
     }
-    entries.sort_unstable_by(|a, b| b.ts.partial_cmp(&a.ts).unwrap_or(std::cmp::Ordering::Equal));
-    entries
+    true
+}
+
+fn has_filters(query: &Query) -> bool {
+    query.status.is_some()
+        || query.host.is_some()
+        || query.method.is_some()
+        || query.ip.is_some()
+        || query.path.is_some()
+        || query.ua.is_some()
+        || query.duration_gt.is_some()
+        || query.size_gt.is_some()
+        || query.size_lt.is_some()
+        || query.text.is_some()
+        || query.not_status.is_some()
+        || query.not_host.is_some()
+        || query.not_method.is_some()
+        || query.not_ip.is_some()
+        || query.not_path.is_some()
+}
+
+fn scan_source(query: &Query) -> crate::db::LogScan {
+    if let Some(status) = query.status.as_deref().and_then(|value| value.parse().ok()) {
+        crate::db::LogScan::Status(status)
+    } else if let Some(method) = &query.method {
+        crate::db::LogScan::Method(method.to_ascii_uppercase())
+    } else {
+        crate::db::LogScan::All
+    }
 }
 
 fn csv_field(s: &str) -> String {
@@ -156,86 +231,125 @@ fn csv_field(s: &str) -> String {
 
 #[get("/logs")]
 async fn get_logs(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let raw = match crate::db::load_entries(&db) {
-        Ok(v) => v,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
-    };
-    let entries = apply_filters(raw, &query);
-    let limit = query.limit.unwrap_or(50).min(500);
+    let started = Instant::now();
+    let query = query.into_inner();
+    let limit = query.limit.unwrap_or(50).clamp(1, 500);
     let page = query.page.unwrap_or(0);
-    let total = entries.len();
-    let entries: Vec<_> = entries.into_iter().skip(page * limit).take(limit).collect();
-    HttpResponse::Ok().json(serde_json::json!({
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "entries": entries,
-    }))
+    let cursor = query.cursor;
+    let skip = if cursor.is_none() {
+        page.saturating_mul(limit)
+    } else {
+        0
+    };
+    let source = scan_source(&query);
+    let include_total = !has_filters(&query);
+    let db = db.into_inner();
+    let result = web::block(move || {
+        crate::db::scan_logs_page(&db, source, cursor, skip, limit, include_total, |entry| {
+            entry_matches(entry, &query)
+        })
+    })
+    .await;
+
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
+    match result {
+        Ok(Ok(result)) => HttpResponse::Ok()
+            .insert_header((
+                "Server-Timing",
+                format!(
+                    "logs;dur={elapsed_ms:.1};desc=\"scanned {}\"",
+                    result.scanned
+                ),
+            ))
+            .json(serde_json::json!({
+                "total": result.total,
+                "page": page,
+                "limit": limit,
+                "next_cursor": result.next_cursor.map(|cursor| cursor.to_string()),
+                "has_more": result.has_more,
+                "entries": result.entries,
+            })),
+        Ok(Err(error)) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": error}))
+        }
+        Err(error) => {
+            log::error!("logs blocking task: {error}");
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Database error"}))
+        }
+    }
 }
 
 #[get("/logs/export")]
 async fn export_logs_csv(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let raw = match crate::db::load_entries(&db) {
-        Ok(v) => v,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
-    };
-    let entries = apply_filters(raw, &query);
+    let query = query.into_inner();
+    let db = db.into_inner();
+    let result = web::block(move || {
+        let mut csv = String::from(
+            "timestamp,unix_ts,status,method,protocol,host,path,duration_ms,size_bytes,bytes_read,client_ip,remote_ip,user_agent\n"
+        );
+        crate::db::visit_logs_newest(&db, |entry| {
+            if !entry_matches(entry, &query) {
+                return;
+            }
+            let ts = chrono::DateTime::from_timestamp(entry.ts as i64, 0)
+                .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                .unwrap_or_default();
+            let ua = entry.request.headers.get("User-Agent")
+                .and_then(|values| values.first())
+                .map(String::as_str)
+                .unwrap_or("");
+            csv.push_str(&format!(
+                "{},{},{},{},{},{},{},{:.3},{},{},{},{},{}\n",
+                csv_field(&ts), entry.ts, entry.status,
+                csv_field(&entry.request.method), csv_field(&entry.request.proto),
+                csv_field(&entry.request.host), csv_field(&entry.request.uri),
+                entry.duration * 1000.0, entry.size, entry.bytes_read,
+                csv_field(&entry.request.client_ip), csv_field(&entry.request.remote_ip),
+                csv_field(ua),
+            ));
+        })?;
+        Ok::<_, String>(csv)
+    })
+    .await;
 
-    let mut csv = String::from(
-        "timestamp,unix_ts,status,method,protocol,host,path,duration_ms,size_bytes,bytes_read,client_ip,remote_ip,user_agent\n"
-    );
-    for e in &entries {
-        let ts = chrono::DateTime::from_timestamp(e.ts as i64, 0)
-            .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-            .unwrap_or_default();
-        let ua = e.request.headers.get("User-Agent")
-            .and_then(|v| v.first())
-            .map(|s| s.as_str())
-            .unwrap_or("");
-        csv.push_str(&format!(
-            "{},{},{},{},{},{},{},{:.3},{},{},{},{},{}\n",
-            csv_field(&ts),
-            e.ts,
-            e.status,
-            csv_field(&e.request.method),
-            csv_field(&e.request.proto),
-            csv_field(&e.request.host),
-            csv_field(&e.request.uri),
-            e.duration * 1000.0,
-            e.size,
-            e.bytes_read,
-            csv_field(&e.request.client_ip),
-            csv_field(&e.request.remote_ip),
-            csv_field(ua),
-        ));
+    match result {
+        Ok(Ok(csv)) => HttpResponse::Ok()
+            .insert_header(("Content-Type", "text/csv; charset=utf-8"))
+            .insert_header((
+                "Content-Disposition",
+                "attachment; filename=\"caddy-logs.csv\"",
+            ))
+            .body(csv),
+        Ok(Err(error)) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": error}))
+        }
+        Err(error) => {
+            log::error!("CSV export blocking task: {error}");
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Database error"}))
+        }
     }
-
-    HttpResponse::Ok()
-        .insert_header(("Content-Type", "text/csv; charset=utf-8"))
-        .insert_header(("Content-Disposition", "attachment; filename=\"caddy-logs.csv\""))
-        .body(csv)
 }
 
 #[get("/logs/stream")]
-async fn stream_logs(tx: web::Data<broadcast::Sender<crate::log_parser::LogEntry>>) -> HttpResponse {
+async fn stream_logs(
+    tx: web::Data<broadcast::Sender<crate::log_parser::LogEntry>>,
+) -> HttpResponse {
     let rx = tx.subscribe();
 
     let event_stream = stream::unfold(rx, |mut rx| async move {
         match rx.recv().await {
-            Ok(entry) => {
-                match serde_json::to_string(&entry) {
-                    Ok(json) => Some((
-                        Ok::<actix_web::web::Bytes, actix_web::Error>(
-                            actix_web::web::Bytes::from(format!("data: {json}\n\n")),
-                        ),
-                        rx,
+            Ok(entry) => match serde_json::to_string(&entry) {
+                Ok(json) => Some((
+                    Ok::<actix_web::web::Bytes, actix_web::Error>(actix_web::web::Bytes::from(
+                        format!("data: {json}\n\n"),
                     )),
-                    Err(e) => {
-                        log::error!("stream_logs: serialize entry: {e}");
-                        None
-                    }
+                    rx,
+                )),
+                Err(e) => {
+                    log::error!("stream_logs: serialize entry: {e}");
+                    None
                 }
-            }
+            },
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 log::warn!("stream_logs: subscriber lagged, dropped {n} messages");
                 Some((Ok(actix_web::web::Bytes::from_static(b": lagged\n\n")), rx))

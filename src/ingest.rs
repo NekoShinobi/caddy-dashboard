@@ -1,6 +1,6 @@
-use crate::db::{LOGS, META, META_LAST_INODE, META_LAST_POS, META_NEXT_ID};
+use crate::db::{META, META_LAST_INODE, META_LAST_POS};
 use crate::log_parser::LogEntry;
-use redb::{Database, ReadableDatabase, ReadableTable};
+use redb::{Database, ReadableDatabase};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::sync::Arc;
@@ -76,7 +76,9 @@ fn ingest_batch(
                 if !trimmed.is_empty() {
                     match serde_json::from_str(trimmed) {
                         Ok(entry) => entries.push(entry),
-                        Err(e) => log::error!("ingest: failed to parse log line: {e} — line: {trimmed}"),
+                        Err(e) => {
+                            log::error!("ingest: failed to parse log line: {e} — line: {trimmed}")
+                        }
                     }
                 }
             }
@@ -91,30 +93,7 @@ fn ingest_batch(
         return Ok(());
     }
 
-    let wtxn = db.begin_write()?;
-    {
-        let mut logs = wtxn.open_table(LOGS)?;
-        let mut meta = wtxn.open_table(META)?;
-
-        let mut next_id = meta.get(META_NEXT_ID)?.map(|v| v.value()).unwrap_or(0);
-
-        for entry in &entries {
-            let json = match serde_json::to_string(entry) {
-                Ok(j) => j,
-                Err(e) => {
-                    log::error!("ingest: failed to serialize log entry: {e}");
-                    continue;
-                }
-            };
-            logs.insert(next_id, json.as_str())?;
-            next_id += 1;
-        }
-
-        meta.insert(META_NEXT_ID, next_id)?;
-        meta.insert(META_LAST_POS, pos)?;
-        meta.insert(META_LAST_INODE, file_meta.ino())?;
-    }
-    wtxn.commit()?;
+    crate::db::append_entries(db, &entries, pos, file_meta.ino())?;
 
     for entry in entries {
         let _ = tx.send(entry);

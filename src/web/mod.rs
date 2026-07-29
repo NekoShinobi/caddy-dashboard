@@ -1,5 +1,6 @@
 use actix_files::{Files, NamedFile};
-use actix_web::{web, App, HttpRequest, HttpServer, Result};
+use actix_web::middleware::Logger as RequestLogger;
+use actix_web::{App, HttpRequest, HttpServer, Result, web};
 use redb::Database;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -25,10 +26,7 @@ pub async fn start(
     let geoip_data = web::Data::new(geoip);
     let throttle = web::Data::new(crate::login_throttle::LoginThrottle::new());
 
-    log::info!(
-        "session cookies: secure={}",
-        *crate::env::COOKIE_SECURE
-    );
+    log::info!("session cookies: secure={}", *crate::env::COOKIE_SECURE);
 
     HttpServer::new(move || {
         App::new()
@@ -36,6 +34,7 @@ pub async fn start(
             .app_data(tx_data.clone())
             .app_data(geoip_data.clone())
             .app_data(throttle.clone())
+            .wrap(RequestLogger::new("%r %s %Dms"))
             .configure(services::configure)
             .service(Files::new("/", "./static").index_file("index.html"))
             .default_service(web::get().to(spa_fallback))

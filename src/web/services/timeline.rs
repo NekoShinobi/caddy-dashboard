@@ -1,14 +1,17 @@
-use actix_web::{get, web, HttpResponse};
+use crate::analytics::Rollup;
+use actix_web::{HttpResponse, get, web};
 use redb::Database;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Query {
     bucket: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct Bucket {
     ts: u64,
     total: usize,
@@ -26,120 +29,141 @@ struct Bucket {
     methods: HashMap<String, usize>,
 }
 
-fn percentile_f64(sorted: &[f64], p: f64) -> f64 {
-    if sorted.is_empty() { return 0.0; }
-    let idx = ((p / 100.0) * (sorted.len() - 1) as f64).ceil() as usize;
-    sorted[idx.min(sorted.len() - 1)]
+#[derive(Clone, Serialize)]
+struct Timeline {
+    buckets: Vec<Bucket>,
+    bucket_secs: u64,
 }
 
-fn percentile_u64(sorted: &[u64], p: f64) -> f64 {
-    if sorted.is_empty() { return 0.0; }
-    let idx = ((p / 100.0) * (sorted.len() - 1) as f64).ceil() as usize;
-    sorted[idx.min(sorted.len() - 1)] as f64
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+struct CacheKey {
+    bucket_secs: u64,
+    end_bucket: u64,
+    generation: u64,
 }
 
-struct BucketAccum {
-    total: usize,
-    s2xx: usize,
-    s3xx: usize,
-    s4xx: usize,
-    s5xx: usize,
-    durations: Vec<f64>,
-    sizes: Vec<u64>,
-    hosts: HashSet<String>,
-    methods: HashMap<String, usize>,
+static CACHE: LazyLock<Mutex<HashMap<CacheKey, Timeline>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn status_count(rollup: &Rollup, range: std::ops::RangeInclusive<u16>) -> usize {
+    rollup
+        .status_codes
+        .iter()
+        .filter(|(status, _)| range.contains(status))
+        .map(|(_, count)| *count as usize)
+        .sum()
 }
 
-impl BucketAccum {
-    fn new() -> Self {
-        Self { total: 0, s2xx: 0, s3xx: 0, s4xx: 0, s5xx: 0,
-               durations: Vec::new(), sizes: Vec::new(), hosts: HashSet::new(),
-               methods: HashMap::new() }
+fn make_bucket(ts: u64, rollup: Rollup) -> Bucket {
+    Bucket {
+        ts,
+        total: rollup.total as usize,
+        s2xx: status_count(&rollup, 200..=299),
+        s3xx: status_count(&rollup, 300..=399),
+        s4xx: status_count(&rollup, 400..=499),
+        s5xx: status_count(&rollup, 500..=u16::MAX),
+        avg_duration_ms: if rollup.total > 0 {
+            rollup.duration_sum_ms / rollup.total as f64
+        } else {
+            0.0
+        },
+        median_duration_ms: rollup.durations.quantile(50.0),
+        p99_duration_ms: rollup.durations.quantile(99.0),
+        avg_size: if rollup.total > 0 {
+            rollup.total_bytes as f64 / rollup.total as f64
+        } else {
+            0.0
+        },
+        median_size: rollup.sizes.quantile(50.0),
+        p99_size: rollup.sizes.quantile(99.0),
+        unique_clients: rollup.unique_clients(),
+        methods: rollup
+            .methods
+            .into_iter()
+            .map(|(method, count)| (method, count as usize))
+            .collect(),
     }
+}
+
+fn build_timeline(
+    db: &Database,
+    bucket_secs: u64,
+    window_secs: u64,
+    now: u64,
+) -> Result<Timeline, String> {
+    let cutoff = now.saturating_sub(window_secs) as f64;
+    let start_bucket = (cutoff as u64 / bucket_secs) * bucket_secs;
+    let end_bucket = (now / bucket_secs) * bucket_secs;
+    let mut buckets = Vec::new();
+    let mut timestamp = start_bucket;
+    while timestamp <= end_bucket {
+        let rollup =
+            crate::db::aggregate_timeline_bucket(db, timestamp, bucket_secs, cutoff, now as f64)?;
+        buckets.push(make_bucket(timestamp, rollup));
+        timestamp += bucket_secs;
+    }
+    Ok(Timeline {
+        buckets,
+        bucket_secs,
+    })
 }
 
 #[get("/timeline")]
 async fn get_timeline(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let bucket_str = query.bucket.as_deref().unwrap_or("hour");
-    let (bucket_secs, window_secs): (u64, u64) = match bucket_str {
-        "minute" => (60,    3_600),
-        "hour"   => (3600,  86_400),
-        "day"    => (86400, 2_592_000),
-        _ => return HttpResponse::BadRequest()
-            .json(serde_json::json!({"error": "Invalid bucket. Valid values: minute, hour, day"})),
+    let bucket = query.bucket.as_deref().unwrap_or("hour");
+    let (bucket_secs, window_secs): (u64, u64) = match bucket {
+        "minute" => (60, 3_600),
+        "hour" => (3_600, 86_400),
+        "day" => (86_400, 2_592_000),
+        _ => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "error": "Invalid bucket. Valid values: minute, hour, day"
+            }));
+        }
     };
 
-    let all = match crate::db::load_entries(&db) {
-        Ok(v) => v,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
-    };
-
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    let started = Instant::now();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-
-    let cutoff = now_secs.saturating_sub(window_secs) as f64;
-    let entries: Vec<_> = all.into_iter().filter(|e| e.ts >= cutoff).collect();
-
-    let mut map: HashMap<u64, BucketAccum> = HashMap::new();
-
-    // Pre-populate every bucket in the window so the x-axis always spans the full range
-    let start_bucket = (cutoff as u64 / bucket_secs) * bucket_secs;
-    let end_bucket   = (now_secs / bucket_secs) * bucket_secs;
-    let mut t = start_bucket;
-    while t <= end_bucket {
-        map.insert(t, BucketAccum::new());
-        t += bucket_secs;
-    }
-
-    for e in &entries {
-        let key = (e.ts as u64 / bucket_secs) * bucket_secs;
-        let b = map.entry(key).or_insert_with(BucketAccum::new);
-        b.total += 1;
-        match e.status {
-            200..=299 => b.s2xx += 1,
-            300..=399 => b.s3xx += 1,
-            400..=499 => b.s4xx += 1,
-            _ => b.s5xx += 1,
+    let db = db.into_inner();
+    let result = web::block(move || {
+        let key = CacheKey {
+            bucket_secs,
+            end_bucket: (now / bucket_secs) * bucket_secs,
+            generation: crate::db::analytics_generation(&db),
+        };
+        if let Some(cached) = CACHE.lock().unwrap().get(&key).cloned() {
+            return Ok::<_, String>((cached, true));
         }
-        b.durations.push(e.duration * 1000.0);
-        b.sizes.push(e.size);
-        b.hosts.insert(e.request.client_ip.clone());
-        *b.methods.entry(e.request.method.clone()).or_insert(0) += 1;
+        let timeline = build_timeline(&db, bucket_secs, window_secs, now)?;
+        let mut cache = CACHE.lock().unwrap();
+        if cache.len() >= 16 {
+            cache.clear();
+        }
+        cache.insert(key, timeline.clone());
+        Ok((timeline, false))
+    })
+    .await;
+
+    let elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
+    match result {
+        Ok(Ok((timeline, cache_hit))) => HttpResponse::Ok()
+            .insert_header((
+                "Server-Timing",
+                format!(
+                    "timeline;dur={elapsed_ms:.1}, cache;desc=\"{}\"",
+                    if cache_hit { "hit" } else { "miss" }
+                ),
+            ))
+            .json(timeline),
+        Ok(Err(error)) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": error}))
+        }
+        Err(error) => {
+            log::error!("timeline blocking task: {error}");
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Database error"}))
+        }
     }
-
-    let mut buckets: Vec<Bucket> = map
-        .into_iter()
-        .map(|(ts, mut b)| {
-            b.durations.sort_unstable_by(|a, c| a.partial_cmp(c).unwrap());
-            b.sizes.sort_unstable();
-            let avg_duration_ms = if b.total > 0 {
-                b.durations.iter().sum::<f64>() / b.total as f64
-            } else { 0.0 };
-            let avg_size = if b.total > 0 {
-                b.sizes.iter().sum::<u64>() as f64 / b.total as f64
-            } else { 0.0 };
-            Bucket {
-                ts,
-                total: b.total,
-                s2xx: b.s2xx,
-                s3xx: b.s3xx,
-                s4xx: b.s4xx,
-                s5xx: b.s5xx,
-                avg_duration_ms,
-                median_duration_ms: percentile_f64(&b.durations, 50.0),
-                p99_duration_ms: percentile_f64(&b.durations, 99.0),
-                avg_size,
-                median_size: percentile_u64(&b.sizes, 50.0),
-                p99_size: percentile_u64(&b.sizes, 99.0),
-                unique_clients: b.hosts.len(),
-                methods: b.methods,
-            }
-        })
-        .collect();
-
-    buckets.sort_unstable_by_key(|b| b.ts);
-
-    HttpResponse::Ok().json(serde_json::json!({ "buckets": buckets, "bucket_secs": bucket_secs }))
 }

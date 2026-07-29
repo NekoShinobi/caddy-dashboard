@@ -39,9 +39,11 @@
 	}
 
 	interface LogsResponse {
-		total: number;
+		total: number | null;
 		page: number;
 		limit: number;
+		next_cursor: string | null;
+		has_more: boolean;
 		entries: LogEntry[];
 	}
 
@@ -52,9 +54,10 @@
 	let query = $state('');
 	let page = $state(0);
 	let limit = $state(50);
-	let pageInput = $state('1');
+	let cursors = $state<(string | null)[]>([null]);
 	let showHelp = $state(false);
 	let selectedEntry = $state<LogEntry | null>(null);
+	let requestController: AbortController | null = null;
 
 	interface Filters {
 		status?: string;
@@ -148,16 +151,19 @@
 	}
 
 	async function fetchLogs() {
+		requestController?.abort();
+		const controller = new AbortController();
+		requestController = controller;
 		loading = true;
 		error = '';
 		try {
 			const params = buildFilterParams();
-			params.set('page', String(page));
 			params.set('limit', String(limit));
-			const res = await fetch(`/api/logs?${params}`);
+			const cursor = cursors[page];
+			if (cursor !== null && cursor !== undefined) params.set('cursor', String(cursor));
+			const res = await fetch(`/api/logs?${params}`, { signal: controller.signal });
 			if (res.status >= 400 && res.status < 500) {
-				data = { total: 0, page: 0, limit, entries: [] };
-				pageInput = '1';
+				data = { total: 0, page, limit, next_cursor: null, has_more: false, entries: [] };
 				return;
 			}
 			if (!res.ok) {
@@ -165,16 +171,17 @@
 				throw new Error(d.error ?? `HTTP ${res.status}`);
 			}
 			data = await res.json();
-			pageInput = String(page + 1);
 		} catch (e) {
+			if (e instanceof DOMException && e.name === 'AbortError') return;
 			error = e instanceof Error ? e.message : 'Failed to fetch logs';
 		} finally {
-			loading = false;
+			if (requestController === controller) loading = false;
 		}
 	}
 
 	function applyFilters() {
 		page = 0;
+		cursors = [null];
 		fetchLogs();
 	}
 
@@ -183,20 +190,23 @@
 		applyFilters();
 	}
 
-	function goToPage(n: number) {
-		const maxPage = data ? Math.ceil(data.total / limit) - 1 : 0;
-		page = Math.max(0, Math.min(n, maxPage));
+	function goPrevious() {
+		if (page === 0) return;
+		page -= 1;
 		fetchLogs();
 	}
 
-	function onPageInputCommit() {
-		const n = parseInt(pageInput, 10);
-		if (!isNaN(n)) goToPage(n - 1);
+	function goNext() {
+		if (!data?.has_more || data.next_cursor === null) return;
+		cursors = [...cursors.slice(0, page + 1), data.next_cursor];
+		page += 1;
+		fetchLogs();
 	}
 
 	function onLimitChange(e: Event) {
 		limit = parseInt((e.target as HTMLSelectElement).value, 10);
 		page = 0;
+		cursors = [null];
 		fetchLogs();
 	}
 
@@ -226,6 +236,7 @@
 		if (sp.get('path'))   parts.push(`path:${sp.get('path')}`);
 		if (parts.length) query = parts.join(' ');
 		fetchLogs();
+		return () => requestController?.abort();
 	});
 </script>
 
@@ -278,8 +289,9 @@
 					: 'border-neutral-200 text-neutral-500 hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5'}"
 			>?</button>
 			<div class="flex items-center gap-2">
-				<label class="text-sm text-neutral-500 dark:text-white/50">Rows</label>
+				<label for="rows-per-page" class="text-sm text-neutral-500 dark:text-white/50">Rows</label>
 				<select
+					id="rows-per-page"
 					onchange={onLimitChange}
 					value={limit}
 					class="rounded-lg border border-neutral-200 bg-neutral-100 px-2 py-2 text-sm outline-none dark:border-white/10 dark:bg-white/5"
@@ -363,8 +375,10 @@
 		<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">{error}</div>
 	{/if}
 
-	{#if data}
-		<p class="text-sm text-neutral-500 dark:text-white/50">{data.total.toLocaleString()} entries</p>
+		{#if data}
+			<p class="text-sm text-neutral-500 dark:text-white/50">
+				{data.total === null ? 'Filtered results' : `${data.total.toLocaleString()} entries`}
+			</p>
 
 		<div class="overflow-x-auto rounded-lg border border-neutral-200 dark:border-white/10">
 			<table class="w-full text-sm">
@@ -405,25 +419,18 @@
 			</table>
 		</div>
 
-		<div class="flex items-center gap-3">
-			<button
-				onclick={() => goToPage(page - 1)}
-				disabled={page === 0}
+			<div class="flex items-center gap-3">
+				<button
+					onclick={goPrevious}
+					disabled={page === 0}
 				class="rounded-lg border border-neutral-200 px-4 py-2 text-sm disabled:opacity-30 hover:bg-neutral-50 dark:border-white/10 dark:hover:bg-white/5"
-			>
-				Previous
-			</button>
-			<span class="text-sm text-neutral-500 dark:text-white/50">Page</span>
-			<input
-				bind:value={pageInput}
-				onkeydown={(e) => e.key === 'Enter' && onPageInputCommit()}
-				onblur={onPageInputCommit}
-				class="w-16 rounded-lg border border-neutral-200 bg-neutral-100 px-2 py-2 text-center text-sm outline-none dark:border-white/10 dark:bg-white/5"
-			/>
-			<span class="text-sm text-neutral-500 dark:text-white/50">of {Math.ceil(data.total / limit)}</span>
-			<button
-				onclick={() => goToPage(page + 1)}
-				disabled={(page + 1) * limit >= data.total}
+				>
+					Previous
+				</button>
+				<span class="text-sm text-neutral-500 dark:text-white/50">Page {page + 1}</span>
+				<button
+					onclick={goNext}
+					disabled={!data.has_more}
 				class="rounded-lg border border-neutral-200 px-4 py-2 text-sm disabled:opacity-30 hover:bg-neutral-50 dark:border-white/10 dark:hover:bg-white/5"
 			>
 				Next

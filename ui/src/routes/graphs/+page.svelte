@@ -48,6 +48,7 @@
 	let charts: (Chart<any> | null)[] = [null, null, null, null, null];
 	let loading = $state(true);
 	let error = $state('');
+	let requestController: AbortController | null = null;
 	let bucket = $state('hour');
 	let buckets: Bucket[] = [];
 
@@ -215,10 +216,15 @@
 	}
 
 	async function fetchAndRender() {
+		requestController?.abort();
+		const controller = new AbortController();
+		requestController = controller;
 		loading = true;
 		error = '';
 		try {
-			const res = await fetch(`/api/timeline?bucket=${bucket}`);
+			const res = await fetch(`/api/timeline?bucket=${bucket}`, {
+				signal: controller.signal
+			});
 			if (!res.ok) {
 				const d = await res.json().catch(() => ({}));
 				throw new Error(d.error ?? `HTTP ${res.status}`);
@@ -227,9 +233,10 @@
 			buckets = data.buckets;
 			renderAll();
 		} catch (e) {
+			if (e instanceof DOMException && e.name === 'AbortError') return;
 			error = e instanceof Error ? e.message : 'Failed to fetch timeline';
 		} finally {
-			loading = false;
+			if (requestController === controller) loading = false;
 		}
 	}
 
@@ -241,7 +248,10 @@
 	});
 
 	onMount(fetchAndRender);
-	onDestroy(() => charts.forEach((c) => c?.destroy()));
+	onDestroy(() => {
+		requestController?.abort();
+		charts.forEach((c) => c?.destroy());
+	});
 </script>
 
 <div class="mx-auto max-w-6xl space-y-6">

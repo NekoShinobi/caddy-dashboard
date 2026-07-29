@@ -74,12 +74,16 @@ This is the recommended log settings that I use for my personal Caddy instance
 ## Architecture
 
 ```
-access.log ──► Ingestion task (250ms poll) ──► redb (./data/caddy.db)
+access.log ──► Ingestion task (250ms poll) ──► redb raw logs + indexes
+                                           ├──► minute/hour/day rollups
                                            └──► broadcast channel ──► SSE clients
-All API reads ──► redb
+Overview/graphs ──► cached rollup merges
+Log browsing ──► reverse cursor scan (status/method indexes when applicable)
 ```
 
 Log entries are parsed once on ingest and stored in an embedded [redb](https://github.com/cberner/redb) database. The source log file is treated as transient; the database is the persistent store.
+
+Existing databases are indexed and backfilled with analytics rollups once on the first startup after upgrading. New writes update the raw log, indexes, and live minute rollup atomically; completed hour and day rollups are compacted at bucket boundaries.
 
 On first start the ingestion task records the current end-of-file position and tails only new entries from that point forward. After a log rotation (inode change or truncation) the new file is read from the beginning.
 
@@ -186,7 +190,7 @@ In Docker, `LOG_PATH` defaults to `/config/access.log` and `DATA_DIR` defaults t
 | Method | Path                           | Description                                                                 |
 |--------|--------------------------------|-----------------------------------------------------------------------------|
 | GET    | `/api/stats`                   | Aggregated stats (status codes, top lists, slowest paths)                   |
-| GET    | `/api/logs`                    | Paginated + filtered log entries                                            |
+| GET    | `/api/logs`                    | Cursor-paginated + filtered log entries                                     |
 | GET    | `/api/logs/export`             | CSV export of filtered log entries                                          |
 | GET    | `/api/logs/stream`             | SSE stream of new log entries in real time                                  |
 | GET    | `/api/timeline`                | Time-bucketed stats (`bucket=minute\|hour\|day`)                            |
@@ -211,6 +215,10 @@ In Docker, `LOG_PATH` defaults to `/config/access.log` and `DATA_DIR` defaults t
 | `not_ip`     | `1.2.3.4`        | Exclude IP                     |
 | `not_status` | `200`            | Exclude status                 |
 | `not_method` | `GET`            | Exclude method                 |
+| `limit`      | `50`             | Rows to return (1-500)         |
+| `cursor`     | `"18420"`        | Exclusive cursor from `next_cursor` |
+
+`/api/logs` returns `next_cursor` and `has_more`. Exact totals are included for unfiltered browsing; filtered requests omit totals so results can stop scanning as soon as a page is full.
 
 ## Project Structure
 
@@ -219,8 +227,9 @@ caddy-dashboard/
 ├── build.rs               Downloads and embeds DB-IP Lite GeoIP MMDB at compile time
 ├── src/
 │   ├── main.rs            Entry point
+│   ├── analytics.rs       Mergeable histograms and analytics rollup types
 │   ├── env.rs             Environment variable config
-│   ├── db.rs              redb setup and helpers (logs, users, sessions, settings, oidc_tokens)
+│   ├── db.rs              redb setup, indexed log queries, rollups, users, and sessions
 │   ├── auth.rs            Password hashing (Argon2id)
 │   ├── session.rs         Session token generation and cookie helpers
 │   ├── oidc.rs            OIDC discovery, token exchange, userinfo, admin claim check
