@@ -26,6 +26,14 @@ setup:
     cargo fetch --locked
     cd ui && bun install --frozen-lockfile
 
+# bun install, but only when ui/node_modules is missing. Without this a fresh
+# clone silently falls back to a registry-fetched prettier that cannot resolve
+# the locally declared plugins, and `fmt-check` fails claiming a plugin is
+# missing when it is really the whole dependency tree.
+[private]
+node-modules:
+    @[ -d ui/node_modules ] || (cd ui && bun install --frozen-lockfile)
+
 # Run the backend and frontend development servers together.
 [group('dev')]
 dev:
@@ -45,7 +53,7 @@ dev-api:
 
 # Run the frontend development server.
 [group('dev')]
-dev-ui:
+dev-ui: node-modules
     cd ui && bun run dev
 
 # ── Build ─────────────────────────────────────────────────────────────────────
@@ -61,7 +69,7 @@ build-api:
 
 # Build the production frontend.
 [group('build')]
-build-ui:
+build-ui: node-modules
     cd ui && bun run build
 
 # ── Quality ───────────────────────────────────────────────────────────────────
@@ -77,7 +85,7 @@ check-api:
 
 # Type-check the Svelte frontend.
 [group('checks')]
-check-ui:
+check-ui: node-modules
     cd ui && bun run check
 
 # Run the Rust test suite.
@@ -96,20 +104,20 @@ lint-api:
 
 # Check frontend formatting and lint rules.
 [group('checks')]
-lint-ui:
+lint-ui: node-modules
     cd ui && bun run lint
 
 # Format Rust and frontend sources.
 [group('checks')]
-fmt:
+fmt: node-modules
     cargo fmt --all
     cd ui && bun run format
 
 # Verify formatting without changing files.
 [group('checks')]
-fmt-check:
+fmt-check: node-modules
     cargo fmt --all -- --check
-    cd ui && bunx prettier --check .
+    cd ui && bun run format:check
 
 # Everything that should pass before a commit.
 [group('checks')]

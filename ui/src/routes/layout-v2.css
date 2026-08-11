@@ -24,7 +24,9 @@
 	padding: 34px clamp(18px, 3vw, 38px) 72px;
 }
 
-.route-frame { min-width: 0; }
+.route-frame {
+	min-width: 0;
+}
 
 .app-shell > .h-screen,
 .app-shell > .min-h-screen {
@@ -32,7 +34,9 @@
 	grid-row: 1 / -1;
 }
 
-.page-shell { gap: 24px; }
+.page-shell {
+	gap: 24px;
+}
 
 .page-header {
 	align-items: flex-end;
@@ -66,7 +70,9 @@
 	box-shadow: none;
 }
 
-.panel-pad { padding: 20px; }
+.panel-pad {
+	padding: 20px;
+}
 
 .metric-board {
 	border-top: 1px solid var(--app-border);
@@ -109,7 +115,9 @@
 	justify-self: center;
 }
 
-.section-heading { margin-bottom: 16px; }
+.section-heading {
+	margin-bottom: 16px;
+}
 
 .data-table-wrap {
 	border-radius: var(--app-radius);
@@ -120,7 +128,11 @@
 .button-secondary,
 .icon-button,
 .segmented-item {
-	transition: background 100ms ease, border-color 100ms ease, color 100ms ease, transform 80ms ease;
+	transition:
+		background 100ms ease,
+		border-color 100ms ease,
+		color 100ms ease,
+		transform 80ms ease;
 }
 
 .segmented-control {
@@ -156,5 +168,7 @@
 }
 
 @media (max-width: 480px) {
-	.metric-cell { min-height: 136px; }
+	.metric-cell {
+		min-height: 136px;
+	}
 }

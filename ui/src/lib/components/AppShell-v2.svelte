@@ -48,7 +48,8 @@
 />
 
 {#if menuOpen}
-	<button class="nav-backdrop" type="button" aria-label="Close navigation" onclick={closeMenu}></button>
+	<button class="nav-backdrop" type="button" aria-label="Close navigation" onclick={closeMenu}
+	></button>
 {/if}
 
 <aside class={['app-sidebar-v2', { open: menuOpen }]} data-od-id="primary-sidebar">
@@ -97,8 +98,16 @@
 			data-od-id="github-star-link"
 			onclick={closeMenu}
 		>
-			<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-				<path d="m12 3 2.78 5.63 6.22.91-4.5 4.38 1.06 6.19L12 17.19l-5.56 2.92 1.06-6.19L3 9.54l6.22-.91L12 3z" />
+			<svg
+				aria-hidden="true"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.8"
+			>
+				<path
+					d="m12 3 2.78 5.63 6.22.91-4.5 4.38 1.06 6.19L12 17.19l-5.56 2.92 1.06-6.19L3 9.54l6.22-.91L12 3z"
+				/>
 			</svg>
 			<span>
 				<small>Enjoying the tool?</small>
@@ -142,7 +151,13 @@
 			title={anonymize.on ? 'Privacy masking on' : 'Privacy masking off'}
 			class="command-control-v2 command-toggle-v2"
 		>
-			<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+			<svg
+				aria-hidden="true"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.8"
+			>
 				<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 				{#if anonymize.on}<path d="M9.5 12.5 11 14l3.5-4" />{/if}
 			</svg>
@@ -157,12 +172,26 @@
 			class="command-control-v2 command-toggle-v2"
 		>
 			{#if theme.dark}
-				<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+				<svg
+					aria-hidden="true"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.8"
+				>
 					<circle cx="12" cy="12" r="4" />
-					<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+					<path
+						d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+					/>
 				</svg>
 			{:else}
-				<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+				<svg
+					aria-hidden="true"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.8"
+				>
 					<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
 				</svg>
 			{/if}
@@ -178,18 +207,20 @@
 					openDelay={80}
 					closeDelay={180}
 				>
-					<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+					<svg
+						aria-hidden="true"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+					>
 						<circle cx="12" cy="8" r="3.5" />
 						<path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
 					</svg>
 				</Popover.Trigger>
 
 				<Popover.Portal>
-					<Popover.Content
-						class="dropdown-content user-menu-v2"
-						sideOffset={8}
-						align="end"
-					>
+					<Popover.Content class="dropdown-content user-menu-v2" sideOffset={8} align="end">
 						<div class="user-menu-identity-v2">
 							<span>Signed in as</span>
 							<strong>{auth.user.username}</strong>
@@ -200,7 +231,13 @@
 							onclick={() => auth.logout()}
 							data-od-id="user-signout"
 						>
-							<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+							<svg
+								aria-hidden="true"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.8"
+							>
 								<path d="M10 17l5-5-5-5M15 12H3" />
 								<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
 							</svg>
@@ -238,7 +275,9 @@
 		text-decoration: none;
 	}
 
-	.brand-v2:hover { background: var(--app-surface-muted); }
+	.brand-v2:hover {
+		background: var(--app-surface-muted);
+	}
 
 	.brand-mark-v2 {
 		display: grid;
@@ -254,8 +293,15 @@
 		font-weight: 700;
 	}
 
-	.brand-copy-v2 { display: grid; line-height: 1.1; }
-	.brand-copy-v2 strong { font-size: 0.86rem; font-weight: 650; letter-spacing: -0.01em; }
+	.brand-copy-v2 {
+		display: grid;
+		line-height: 1.1;
+	}
+	.brand-copy-v2 strong {
+		font-size: 0.86rem;
+		font-weight: 650;
+		letter-spacing: -0.01em;
+	}
 	.brand-copy-v2 small {
 		margin-top: 4px;
 		color: var(--app-muted);
@@ -274,7 +320,10 @@
 		text-transform: uppercase;
 	}
 
-	.nav-list-v2 { display: grid; gap: 3px; }
+	.nav-list-v2 {
+		display: grid;
+		gap: 3px;
+	}
 
 	.nav-item-v2 {
 		position: relative;
@@ -289,11 +338,21 @@
 		font-size: 0.84rem;
 		font-weight: 540;
 		text-decoration: none;
-		transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
+		transition:
+			background 100ms ease,
+			border-color 100ms ease,
+			color 100ms ease;
 	}
 
-	.nav-item-v2:hover { background: var(--app-surface-muted); color: var(--app-fg); }
-	.nav-item-v2.active { border-color: var(--app-border); background: var(--app-accent-soft); color: var(--app-fg); }
+	.nav-item-v2:hover {
+		background: var(--app-surface-muted);
+		color: var(--app-fg);
+	}
+	.nav-item-v2.active {
+		border-color: var(--app-border);
+		background: var(--app-accent-soft);
+		color: var(--app-fg);
+	}
 	.nav-item-v2.active::before {
 		position: absolute;
 		top: 11px;
@@ -305,7 +364,11 @@
 		content: '';
 	}
 
-	.nav-key-v2 { color: var(--app-muted); font-family: var(--font-mono); font-size: 0.6rem; }
+	.nav-key-v2 {
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
+	}
 
 	.sidebar-footer-v2 {
 		display: grid;
@@ -324,7 +387,10 @@
 		color: var(--app-fg);
 		padding: 8px 10px;
 		text-decoration: none;
-		transition: background 100ms ease, border-color 100ms ease, transform 80ms ease;
+		transition:
+			background 100ms ease,
+			border-color 100ms ease,
+			transform 80ms ease;
 	}
 
 	.github-star-v2:hover {
@@ -332,11 +398,27 @@
 		background: var(--app-surface-muted);
 	}
 
-	.github-star-v2:active { transform: translateY(1px); }
-	.github-star-v2 svg { width: 17px; height: 17px; flex: 0 0 17px; }
-	.github-star-v2 span { display: grid; min-width: 0; gap: 2px; }
-	.github-star-v2 strong { font-size: 0.72rem; font-weight: 620; }
-	.github-star-v2 small { color: var(--app-muted); font-size: 0.62rem; }
+	.github-star-v2:active {
+		transform: translateY(1px);
+	}
+	.github-star-v2 svg {
+		width: 17px;
+		height: 17px;
+		flex: 0 0 17px;
+	}
+	.github-star-v2 span {
+		display: grid;
+		min-width: 0;
+		gap: 2px;
+	}
+	.github-star-v2 strong {
+		font-size: 0.72rem;
+		font-weight: 620;
+	}
+	.github-star-v2 small {
+		color: var(--app-muted);
+		font-size: 0.62rem;
+	}
 
 	.sidebar-status-v2 {
 		display: grid;
@@ -347,9 +429,25 @@
 		padding: 18px 8px 8px;
 	}
 
-	.source-indicator-v2 { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--app-success); }
-	.sidebar-status-v2 strong { display: block; font-size: 0.72rem; font-weight: 620; }
-	.sidebar-status-v2 small { display: block; margin-top: 3px; color: var(--app-muted); font-family: var(--font-mono); font-size: 0.61rem; }
+	.source-indicator-v2 {
+		width: 8px;
+		height: 8px;
+		margin-top: 5px;
+		border-radius: 50%;
+		background: var(--app-success);
+	}
+	.sidebar-status-v2 strong {
+		display: block;
+		font-size: 0.72rem;
+		font-weight: 620;
+	}
+	.sidebar-status-v2 small {
+		display: block;
+		margin-top: 3px;
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.61rem;
+	}
 
 	.command-bar-v2 {
 		grid-area: command;
@@ -369,9 +467,23 @@
 	}
 
 	.command-context-v2,
-	.command-actions-v2 { display: flex; min-width: 0; align-items: center; gap: 8px; }
-	.command-context-v2 p { overflow: hidden; color: var(--app-muted); font-size: 0.78rem; text-overflow: ellipsis; white-space: nowrap; }
-	.command-context-v2 strong { color: var(--app-fg); font-weight: 620; }
+	.command-actions-v2 {
+		display: flex;
+		min-width: 0;
+		align-items: center;
+		gap: 8px;
+	}
+	.command-context-v2 p {
+		overflow: hidden;
+		color: var(--app-muted);
+		font-size: 0.78rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.command-context-v2 strong {
+		color: var(--app-fg);
+		font-weight: 620;
+	}
 
 	.menu-control-v2,
 	:global(.command-control-v2) {
@@ -387,15 +499,29 @@
 		padding: 0 12px;
 		font-size: 0.72rem;
 		font-weight: 620;
-		transition: background 100ms ease, border-color 100ms ease, transform 80ms ease;
+		transition:
+			background 100ms ease,
+			border-color 100ms ease,
+			transform 80ms ease;
 	}
 
-	.menu-control-v2 { display: none; }
+	.menu-control-v2 {
+		display: none;
+	}
 	.menu-control-v2:hover,
-	:global(.command-control-v2:hover) { border-color: var(--app-border-strong); background: var(--app-surface-muted); }
+	:global(.command-control-v2:hover) {
+		border-color: var(--app-border-strong);
+		background: var(--app-surface-muted);
+	}
 	.menu-control-v2:active,
-	:global(.command-control-v2:active) { transform: translateY(1px); }
-	:global(.command-control-v2[aria-pressed='true']) { border-color: var(--app-fg); background: var(--app-fg); color: var(--app-bg); }
+	:global(.command-control-v2:active) {
+		transform: translateY(1px);
+	}
+	:global(.command-control-v2[aria-pressed='true']) {
+		border-color: var(--app-fg);
+		background: var(--app-fg);
+		color: var(--app-bg);
+	}
 	:global(.command-control-v2[aria-pressed='true']:hover) {
 		border-color: var(--app-fg);
 		background: color-mix(in oklch, var(--app-fg) 88%, var(--app-bg));
@@ -407,7 +533,10 @@
 		flex: 0 0 44px;
 		padding: 0;
 	}
-	:global(.command-toggle-v2 svg) { width: 18px; height: 18px; }
+	:global(.command-toggle-v2 svg) {
+		width: 18px;
+		height: 18px;
+	}
 	:global(.avatar-trigger-v2) {
 		display: inline-grid;
 		width: 44px;
@@ -418,16 +547,26 @@
 		border-radius: 50%;
 		background: var(--app-surface-muted);
 		color: var(--app-fg);
-		transition: background 100ms ease, border-color 100ms ease, transform 80ms ease;
+		transition:
+			background 100ms ease,
+			border-color 100ms ease,
+			transform 80ms ease;
 	}
 	:global(.avatar-trigger-v2:hover),
 	:global(.avatar-trigger-v2[data-state='open']) {
 		border-color: var(--app-border-strong);
 		background: var(--app-surface);
 	}
-	:global(.avatar-trigger-v2:active) { transform: translateY(1px); }
-	:global(.avatar-trigger-v2 svg) { width: 19px; height: 19px; }
-	:global(.user-menu-v2) { min-width: 232px; }
+	:global(.avatar-trigger-v2:active) {
+		transform: translateY(1px);
+	}
+	:global(.avatar-trigger-v2 svg) {
+		width: 19px;
+		height: 19px;
+	}
+	:global(.user-menu-v2) {
+		min-width: 232px;
+	}
 	:global(.user-menu-identity-v2) {
 		display: grid;
 		gap: 3px;
@@ -464,8 +603,17 @@
 		background: color-mix(in oklch, var(--app-danger) 10%, var(--app-surface));
 		color: color-mix(in oklch, var(--app-danger) 86%, var(--app-fg));
 	}
-	:global(.user-signout-v2 svg) { width: 17px; height: 17px; }
-	.header-clock-v2 { margin-right: 3px; color: var(--app-muted); font-family: var(--font-mono); font-size: 0.66rem; font-variant-numeric: tabular-nums; }
+	:global(.user-signout-v2 svg) {
+		width: 17px;
+		height: 17px;
+	}
+	.header-clock-v2 {
+		margin-right: 3px;
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.66rem;
+		font-variant-numeric: tabular-nums;
+	}
 
 	.nav-backdrop {
 		position: fixed;
@@ -480,7 +628,9 @@
 	}
 
 	@media (max-width: 1080px) {
-		.header-clock-v2 { display: none; }
+		.header-clock-v2 {
+			display: none;
+		}
 	}
 
 	@media (max-width: 920px) {
@@ -493,16 +643,31 @@
 			box-shadow: 18px 0 50px color-mix(in oklch, var(--app-bg) 68%, transparent);
 			transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
 		}
-		.app-sidebar-v2.open { transform: translateX(0); }
-		.nav-backdrop { display: block; }
-		.menu-control-v2 { display: inline-flex; }
-		.command-bar-v2 { padding-inline: 16px; }
+		.app-sidebar-v2.open {
+			transform: translateX(0);
+		}
+		.nav-backdrop {
+			display: block;
+		}
+		.menu-control-v2 {
+			display: inline-flex;
+		}
+		.command-bar-v2 {
+			padding-inline: 16px;
+		}
 	}
 
 	@media (max-width: 620px) {
 		.command-context-v2 p,
-		.command-actions-v2 :global(.icon-button) { display: none; }
-		:global(.command-toggle-v2) { min-width: 44px; padding: 0; }
-		.command-bar-v2 { gap: 10px; }
+		.command-actions-v2 :global(.icon-button) {
+			display: none;
+		}
+		:global(.command-toggle-v2) {
+			min-width: 44px;
+			padding: 0;
+		}
+		.command-bar-v2 {
+			gap: 10px;
+		}
 	}
 </style>

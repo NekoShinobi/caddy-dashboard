@@ -19,7 +19,15 @@
 		Tooltip
 	} from 'chart.js';
 
-	Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip);
+	Chart.register(
+		LineController,
+		LineElement,
+		PointElement,
+		LinearScale,
+		CategoryScale,
+		Filler,
+		Tooltip
+	);
 
 	interface SlowPath {
 		path: string;
@@ -76,7 +84,14 @@
 			count,
 			percentage: total ? (count / total) * 100 : 0,
 			color: statusColor(Number(family.charAt(0)) * 100),
-			label: family === '2xx' ? 'Success' : family === '3xx' ? 'Redirect' : family === '4xx' ? 'Client error' : 'Server error'
+			label:
+				family === '2xx'
+					? 'Success'
+					: family === '3xx'
+						? 'Redirect'
+						: family === '4xx'
+							? 'Client error'
+							: 'Server error'
 		}));
 	});
 
@@ -131,15 +146,18 @@
 
 	function formatBucketLabel(ts: number): string {
 		const date = new Date(ts * 1000);
-		if (bucketKind === 'minute') return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-		if (bucketKind === 'day') return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+		if (bucketKind === 'minute')
+			return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+		if (bucketKind === 'day')
+			return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
 
 	function chartTokens() {
 		const source = canvasRequests?.closest('.app-shell') ?? document.documentElement;
 		const styles = getComputedStyle(source);
-		const token = (name: string, fallback: string) => styles.getPropertyValue(name).trim() || fallback;
+		const token = (name: string, fallback: string) =>
+			styles.getPropertyValue(name).trim() || fallback;
 		return {
 			accent: token('--app-accent', 'oklch(0.72 0.13 205)'),
 			accentSoft: token('--app-accent-soft', 'oklch(0.28 0.055 205)'),
@@ -257,7 +275,9 @@
 		<div>
 			<p class="page-eyebrow">Live operations</p>
 			<h1 class="page-title">Traffic overview</h1>
-			<p class="page-description">Volume, reliability, routing, and response performance in one operational view.</p>
+			<p class="page-description">
+				Volume, reliability, routing, and response performance in one operational view.
+			</p>
 		</div>
 		<div class="overview-actions-v2">
 			<TimeRangeSelector onchange={fetchDashboard} />
@@ -281,7 +301,8 @@
 
 	{#if error}
 		<div class="status-alert status-alert-error" role="alert">
-			<strong>Dashboard data unavailable.</strong> {error}
+			<strong>Dashboard data unavailable.</strong>
+			{error}
 		</div>
 	{/if}
 
@@ -295,8 +316,12 @@
 			{/each}
 		</section>
 		<div class="dashboard-grid-v2" aria-label="Loading dashboard panels">
-			<div class="panel chart-panel-v2 dashboard-span-8"><div class="panel-pad"><span class="skeleton block h-80 w-full"></span></div></div>
-			<div class="panel dashboard-span-4"><div class="panel-pad"><span class="skeleton block h-80 w-full"></span></div></div>
+			<div class="panel chart-panel-v2 dashboard-span-8">
+				<div class="panel-pad"><span class="skeleton block h-80 w-full"></span></div>
+			</div>
+			<div class="panel dashboard-span-4">
+				<div class="panel-pad"><span class="skeleton block h-80 w-full"></span></div>
+			</div>
 		</div>
 	{:else if stats}
 		<section class="metric-board" data-od-id="key-metrics">
@@ -333,25 +358,40 @@
 			<div class="dashboard-grid-v2">
 				<section class="panel chart-panel-v2 dashboard-span-8" data-od-id="request-volume-chart">
 					<header class="panel-header-v2">
-						<div><h2>Request volume</h2><p>Traffic across the selected range</p></div>
+						<div>
+							<h2>Request volume</h2>
+							<p>Traffic across the selected range</p>
+						</div>
 						<span class="panel-meta-v2">{bucketKind} buckets</span>
 					</header>
 					<div class="chart-frame-v2">
 						{#if buckets.length}
-							<canvas bind:this={canvasRequests} aria-label="Filled line chart of request volume over time"></canvas>
+							<canvas
+								bind:this={canvasRequests}
+								aria-label="Filled line chart of request volume over time"
+							></canvas>
 						{:else}
-							<div class="chart-empty-v2"><strong>No timeline data</strong><span>Request totals are available, but no timeline buckets were returned.</span></div>
+							<div class="chart-empty-v2">
+								<strong>No timeline data</strong><span
+									>Request totals are available, but no timeline buckets were returned.</span
+								>
+							</div>
 						{/if}
 					</div>
 				</section>
 
 				<section class="panel dashboard-span-4" data-od-id="status-distribution">
 					<header class="panel-header-v2">
-						<div><h2>Status distribution</h2><p>Share by response family</p></div>
+						<div>
+							<h2>Status distribution</h2>
+							<p>Share by response family</p>
+						</div>
 						<span class="panel-meta-v2">HTTP</span>
 					</header>
 					<div class="status-body-v2">
-						<div class="success-rate-v2"><strong>{successfulShare.toFixed(1)}%</strong><span>successful or redirected</span></div>
+						<div class="success-rate-v2">
+							<strong>{successfulShare.toFixed(1)}%</strong><span>successful or redirected</span>
+						</div>
 						<div class="family-band-v2" aria-label="Status distribution">
 							{#each statusFamilies as family (family.family)}
 								<span
@@ -376,24 +416,39 @@
 
 				<section class="panel dashboard-span-6" data-od-id="top-paths">
 					<header class="panel-header-v2">
-						<div><h2>Top routes</h2><p>Most requested paths</p></div>
+						<div>
+							<h2>Top routes</h2>
+							<p>Most requested paths</p>
+						</div>
 						<a href={resolve('/logs')} class="panel-link-v2">Explore logs</a>
 					</header>
 					<ol class="rank-list-v2">
 						{#each stats.top_paths.slice(0, 6) as [path, count], index (path)}
-							<li><span class="rank-index-v2">{String(index + 1).padStart(2, '0')}</span><a href={resolve(pathLogsLink(path))}>{anonymize.on ? anonPathKey(path) : path}</a><span>{count.toLocaleString()}</span></li>
+							<li>
+								<span class="rank-index-v2">{String(index + 1).padStart(2, '0')}</span><a
+									href={resolve(pathLogsLink(path))}>{anonymize.on ? anonPathKey(path) : path}</a
+								><span>{count.toLocaleString()}</span>
+							</li>
 						{/each}
 					</ol>
 				</section>
 
 				<section class="panel dashboard-span-6" data-od-id="top-clients">
 					<header class="panel-header-v2">
-						<div><h2>Top clients</h2><p>Highest request volume by address</p></div>
+						<div>
+							<h2>Top clients</h2>
+							<p>Highest request volume by address</p>
+						</div>
 						<span class="panel-meta-v2">Requests</span>
 					</header>
 					<ol class="rank-list-v2">
 						{#each stats.top_ips.slice(0, 6) as [ip, count], index (ip)}
-							<li><span class="rank-index-v2">{String(index + 1).padStart(2, '0')}</span><a href={resolve(`/logs?ip=${encodeURIComponent(ip)}`)}>{anonymize.on ? anonIP(ip) : ip}</a><span>{count.toLocaleString()}</span></li>
+							<li>
+								<span class="rank-index-v2">{String(index + 1).padStart(2, '0')}</span><a
+									href={resolve(`/logs?ip=${encodeURIComponent(ip)}`)}
+									>{anonymize.on ? anonIP(ip) : ip}</a
+								><span>{count.toLocaleString()}</span>
+							</li>
 						{/each}
 					</ol>
 				</section>
@@ -401,15 +456,32 @@
 				{#if (stats.slowest_paths ?? []).length > 0}
 					<section class="panel dashboard-span-12" data-od-id="slowest-paths">
 						<header class="panel-header-v2 table-header-v2">
-							<div><h2>Slowest paths</h2><p>Sorted by p99 latency</p></div>
-							<label class="filter-field-v2" for="slow-path-filter"><span>Filter</span><input id="slow-path-filter" type="search" bind:value={slowFilter} placeholder="Filter path" /></label>
+							<div>
+								<h2>Slowest paths</h2>
+								<p>Sorted by p99 latency</p>
+							</div>
+							<label class="filter-field-v2" for="slow-path-filter"
+								><span>Filter</span><input
+									id="slow-path-filter"
+									type="search"
+									bind:value={slowFilter}
+									placeholder="Filter path"
+								/></label
+							>
 						</header>
 						<div class="table-wrap-v2">
 							<table>
 								<thead><tr><th>Path</th><th>Requests</th><th>Average</th><th>p99</th></tr></thead>
 								<tbody>
 									{#each filteredSlowPaths as row (row.path)}
-										<tr><td><a href={resolve(pathLogsLink(row.path))}>{anonymize.on ? anonPathKey(row.path) : row.path}</a></td><td>{row.count.toLocaleString()}</td><td>{formatDurationMs(row.avg_ms)}</td><td class="latency-v2">{formatDurationMs(row.p99_ms)}</td></tr>
+										<tr
+											><td
+												><a href={resolve(pathLogsLink(row.path))}
+													>{anonymize.on ? anonPathKey(row.path) : row.path}</a
+												></td
+											><td>{row.count.toLocaleString()}</td><td>{formatDurationMs(row.avg_ms)}</td
+											><td class="latency-v2">{formatDurationMs(row.p99_ms)}</td></tr
+										>
 									{:else}
 										<tr><td class="table-empty-v2" colspan="4">No paths match this filter.</td></tr>
 									{/each}
@@ -423,20 +495,51 @@
 			<div class="support-grid-v2">
 				{#if stats.top_hosts.length > 0}
 					<section class="panel" data-od-id="top-hosts">
-						<header class="panel-header-v2"><div><h2>Top hosts</h2><p>Highest-volume destinations</p></div></header>
-						<ul class="compact-list-v2">{#each stats.top_hosts.slice(0, 5) as [host, count] (host)}<li><a href={resolve(`/logs?host=${encodeURIComponent(host)}`)}>{anonymize.on ? anonHost(host) : host}</a><span>{count.toLocaleString()}</span></li>{/each}</ul>
+						<header class="panel-header-v2">
+							<div>
+								<h2>Top hosts</h2>
+								<p>Highest-volume destinations</p>
+							</div>
+						</header>
+						<ul class="compact-list-v2">
+							{#each stats.top_hosts.slice(0, 5) as [host, count] (host)}<li>
+									<a href={resolve(`/logs?host=${encodeURIComponent(host)}`)}
+										>{anonymize.on ? anonHost(host) : host}</a
+									><span>{count.toLocaleString()}</span>
+								</li>{/each}
+						</ul>
 					</section>
 				{/if}
 				{#if stats.top_referrers.length > 0}
 					<section class="panel" data-od-id="top-referrers">
-						<header class="panel-header-v2"><div><h2>Top referrers</h2><p>External request sources</p></div></header>
-						<ul class="compact-list-v2">{#each stats.top_referrers.slice(0, 5) as [referrer, count] (referrer)}<li><span>{referrer}</span><span>{count.toLocaleString()}</span></li>{/each}</ul>
+						<header class="panel-header-v2">
+							<div>
+								<h2>Top referrers</h2>
+								<p>External request sources</p>
+							</div>
+						</header>
+						<ul class="compact-list-v2">
+							{#each stats.top_referrers.slice(0, 5) as [referrer, count] (referrer)}<li>
+									<span>{referrer}</span><span>{count.toLocaleString()}</span>
+								</li>{/each}
+						</ul>
 					</section>
 				{/if}
 				{#if stats.top_user_agents.length > 0}
 					<section class="panel" data-od-id="top-user-agents">
-						<header class="panel-header-v2"><div><h2>User agents</h2><p>Client software signatures</p></div></header>
-						<ul class="compact-list-v2">{#each stats.top_user_agents.slice(0, 5) as [ua, count] (ua)}<li><button type="button" onclick={() => (selectedUA = ua)} title="Parse user agent">{ua}</button><span>{count.toLocaleString()}</span></li>{/each}</ul>
+						<header class="panel-header-v2">
+							<div>
+								<h2>User agents</h2>
+								<p>Client software signatures</p>
+							</div>
+						</header>
+						<ul class="compact-list-v2">
+							{#each stats.top_user_agents.slice(0, 5) as [ua, count] (ua)}<li>
+									<button type="button" onclick={() => (selectedUA = ua)} title="Parse user agent"
+										>{ua}</button
+									><span>{count.toLocaleString()}</span>
+								</li>{/each}
+						</ul>
 					</section>
 				{/if}
 			</div>
@@ -449,9 +552,18 @@
 {/if}
 
 <style>
-	.overview-v2 { gap: 22px; }
-	.overview-header-v2 { margin-bottom: 2px; }
-	.overview-actions-v2 { display: flex; max-width: 100%; align-items: center; gap: 8px; }
+	.overview-v2 {
+		gap: 22px;
+	}
+	.overview-header-v2 {
+		margin-bottom: 2px;
+	}
+	.overview-actions-v2 {
+		display: flex;
+		max-width: 100%;
+		align-items: center;
+		gap: 8px;
+	}
 
 	.auto-refresh-option-v2 {
 		display: inline-flex;
@@ -479,7 +591,9 @@
 		border-radius: 999px;
 		background: var(--app-surface-muted);
 		content: '';
-		transition: background 150ms cubic-bezier(0.2, 0, 0, 1), border-color 150ms cubic-bezier(0.2, 0, 0, 1);
+		transition:
+			background 150ms cubic-bezier(0.2, 0, 0, 1),
+			border-color 150ms cubic-bezier(0.2, 0, 0, 1);
 	}
 	:global(.refresh-switch-v2[data-state='checked']::before) {
 		border-color: var(--app-fg);
@@ -499,13 +613,27 @@
 		transform: translateX(0);
 		transition: transform 150ms cubic-bezier(0.2, 0, 0, 1);
 	}
-	:global(.refresh-switch-thumb-v2[data-state='checked']) { transform: translateX(16px); }
+	:global(.refresh-switch-thumb-v2[data-state='checked']) {
+		transform: translateX(16px);
+	}
 
-	.dashboard-grid-v2 { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
-	.dashboard-span-4 { grid-column: span 4; }
-	.dashboard-span-6 { grid-column: span 6; }
-	.dashboard-span-8 { grid-column: span 8; }
-	.dashboard-span-12 { grid-column: 1 / -1; }
+	.dashboard-grid-v2 {
+		display: grid;
+		grid-template-columns: repeat(12, minmax(0, 1fr));
+		gap: 16px;
+	}
+	.dashboard-span-4 {
+		grid-column: span 4;
+	}
+	.dashboard-span-6 {
+		grid-column: span 6;
+	}
+	.dashboard-span-8 {
+		grid-column: span 8;
+	}
+	.dashboard-span-12 {
+		grid-column: 1 / -1;
+	}
 
 	.panel-header-v2 {
 		display: flex;
@@ -516,88 +644,351 @@
 		border-bottom: 1px solid var(--app-border);
 		padding: 13px 18px;
 	}
-	.panel-header-v2 h2 { margin: 0; font-size: 0.92rem; font-weight: 640; letter-spacing: -0.01em; }
-	.panel-header-v2 p { margin: 3px 0 0; color: var(--app-muted); font-size: 0.68rem; }
-	.panel-meta-v2 { color: var(--app-muted); font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase; }
-	.panel-link-v2 { color: var(--app-fg); font-size: 0.7rem; font-weight: 620; text-decoration: underline; text-decoration-color: var(--app-border); text-underline-offset: 0.2em; }
-	.panel-link-v2:hover { text-decoration-color: var(--app-fg); }
+	.panel-header-v2 h2 {
+		margin: 0;
+		font-size: 0.92rem;
+		font-weight: 640;
+		letter-spacing: -0.01em;
+	}
+	.panel-header-v2 p {
+		margin: 3px 0 0;
+		color: var(--app-muted);
+		font-size: 0.68rem;
+	}
+	.panel-meta-v2 {
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.62rem;
+		text-transform: uppercase;
+	}
+	.panel-link-v2 {
+		color: var(--app-fg);
+		font-size: 0.7rem;
+		font-weight: 620;
+		text-decoration: underline;
+		text-decoration-color: var(--app-border);
+		text-underline-offset: 0.2em;
+	}
+	.panel-link-v2:hover {
+		text-decoration-color: var(--app-fg);
+	}
 
-	.chart-frame-v2 { position: relative; height: clamp(260px, 32vw, 360px); padding: 18px 18px 12px; }
-	.chart-frame-v2 canvas { width: 100% !important; height: 100% !important; }
-	.chart-empty-v2 { display: grid; height: 100%; place-content: center; justify-items: center; gap: 5px; text-align: center; }
-	.chart-empty-v2 strong { font-size: 0.9rem; }
-	.chart-empty-v2 span { max-width: 42ch; color: var(--app-muted); font-size: 0.76rem; }
+	.chart-frame-v2 {
+		position: relative;
+		height: clamp(260px, 32vw, 360px);
+		padding: 18px 18px 12px;
+	}
+	.chart-frame-v2 canvas {
+		width: 100% !important;
+		height: 100% !important;
+	}
+	.chart-empty-v2 {
+		display: grid;
+		height: 100%;
+		place-content: center;
+		justify-items: center;
+		gap: 5px;
+		text-align: center;
+	}
+	.chart-empty-v2 strong {
+		font-size: 0.9rem;
+	}
+	.chart-empty-v2 span {
+		max-width: 42ch;
+		color: var(--app-muted);
+		font-size: 0.76rem;
+	}
 
-	.status-body-v2 { display: grid; gap: 16px; padding: 18px; }
-	.success-rate-v2 { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-	.success-rate-v2 strong { font-family: var(--font-mono); font-size: 1.75rem; font-weight: 560; letter-spacing: -0.035em; }
-	.success-rate-v2 span { max-width: 14ch; color: var(--app-muted); font-size: 0.68rem; text-align: right; }
-	.family-band-v2 { display: flex; height: 13px; overflow: hidden; border-radius: 4px; background: var(--app-surface-muted); }
-	.family-segment-v2 { width: var(--share); min-width: 0; background: var(--tone); }
-	.family-list-v2 { display: grid; margin: 0; padding: 0; list-style: none; }
-	.family-list-v2 li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; min-height: 48px; align-items: center; gap: 10px; border-bottom: 1px solid var(--app-border); }
-	.family-list-v2 li:last-child { border-bottom: 0; }
-	.family-swatch-v2 { width: 7px; height: 7px; border-radius: 2px; background: var(--tone); }
-	.family-list-v2 strong { display: block; font-family: var(--font-mono); font-size: 0.7rem; font-weight: 650; }
-	.family-list-v2 small { display: block; margin-top: 2px; color: var(--app-muted); font-size: 0.65rem; }
-	.family-count-v2 { color: var(--app-muted); font-family: var(--font-mono); font-size: 0.68rem; }
+	.status-body-v2 {
+		display: grid;
+		gap: 16px;
+		padding: 18px;
+	}
+	.success-rate-v2 {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 12px;
+	}
+	.success-rate-v2 strong {
+		font-family: var(--font-mono);
+		font-size: 1.75rem;
+		font-weight: 560;
+		letter-spacing: -0.035em;
+	}
+	.success-rate-v2 span {
+		max-width: 14ch;
+		color: var(--app-muted);
+		font-size: 0.68rem;
+		text-align: right;
+	}
+	.family-band-v2 {
+		display: flex;
+		height: 13px;
+		overflow: hidden;
+		border-radius: 4px;
+		background: var(--app-surface-muted);
+	}
+	.family-segment-v2 {
+		width: var(--share);
+		min-width: 0;
+		background: var(--tone);
+	}
+	.family-list-v2 {
+		display: grid;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.family-list-v2 li {
+		display: grid;
+		grid-template-columns: 8px minmax(0, 1fr) auto;
+		min-height: 48px;
+		align-items: center;
+		gap: 10px;
+		border-bottom: 1px solid var(--app-border);
+	}
+	.family-list-v2 li:last-child {
+		border-bottom: 0;
+	}
+	.family-swatch-v2 {
+		width: 7px;
+		height: 7px;
+		border-radius: 2px;
+		background: var(--tone);
+	}
+	.family-list-v2 strong {
+		display: block;
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
+		font-weight: 650;
+	}
+	.family-list-v2 small {
+		display: block;
+		margin-top: 2px;
+		color: var(--app-muted);
+		font-size: 0.65rem;
+	}
+	.family-count-v2 {
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.68rem;
+	}
 
-	.rank-list-v2 { margin: 0; padding: 6px 18px 8px; list-style: none; }
-	.rank-list-v2 li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; min-height: 44px; align-items: center; gap: 10px; border-bottom: 1px solid var(--app-border); }
-	.rank-list-v2 li:last-child { border-bottom: 0; }
-	.rank-list-v2 a { min-width: 0; overflow: hidden; color: var(--app-fg); font-family: var(--font-mono); font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
-	.rank-list-v2 a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-	.rank-list-v2 li > span:last-child { color: var(--app-muted); font-family: var(--font-mono); font-size: 0.68rem; }
-	.rank-index-v2 { color: var(--app-muted); font-family: var(--font-mono); font-size: 0.62rem; }
+	.rank-list-v2 {
+		margin: 0;
+		padding: 6px 18px 8px;
+		list-style: none;
+	}
+	.rank-list-v2 li {
+		display: grid;
+		grid-template-columns: 24px minmax(0, 1fr) auto;
+		min-height: 44px;
+		align-items: center;
+		gap: 10px;
+		border-bottom: 1px solid var(--app-border);
+	}
+	.rank-list-v2 li:last-child {
+		border-bottom: 0;
+	}
+	.rank-list-v2 a {
+		min-width: 0;
+		overflow: hidden;
+		color: var(--app-fg);
+		font-family: var(--font-mono);
+		font-size: 0.72rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.rank-list-v2 a:hover {
+		text-decoration: underline;
+		text-underline-offset: 0.2em;
+	}
+	.rank-list-v2 li > span:last-child {
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.68rem;
+	}
+	.rank-index-v2 {
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.62rem;
+	}
 
-	.table-header-v2 { min-height: 72px; }
-	.filter-field-v2 { display: flex; align-items: center; gap: 8px; color: var(--app-muted); font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase; }
-	.filter-field-v2 input { width: min(220px, 36vw); min-height: 40px; border: 1px solid var(--app-border); border-radius: var(--app-radius-sm); background: var(--app-bg); color: var(--app-fg); padding: 0 12px; font-family: var(--font-sans); font-size: 0.74rem; text-transform: none; }
-	.filter-field-v2 input::placeholder { color: var(--app-muted); opacity: 1; }
-	.table-wrap-v2 { overflow-x: auto; }
-	.table-wrap-v2 table { width: 100%; min-width: 720px; border-collapse: collapse; }
+	.table-header-v2 {
+		min-height: 72px;
+	}
+	.filter-field-v2 {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.62rem;
+		text-transform: uppercase;
+	}
+	.filter-field-v2 input {
+		width: min(220px, 36vw);
+		min-height: 40px;
+		border: 1px solid var(--app-border);
+		border-radius: var(--app-radius-sm);
+		background: var(--app-bg);
+		color: var(--app-fg);
+		padding: 0 12px;
+		font-family: var(--font-sans);
+		font-size: 0.74rem;
+		text-transform: none;
+	}
+	.filter-field-v2 input::placeholder {
+		color: var(--app-muted);
+		opacity: 1;
+	}
+	.table-wrap-v2 {
+		overflow-x: auto;
+	}
+	.table-wrap-v2 table {
+		width: 100%;
+		min-width: 720px;
+		border-collapse: collapse;
+	}
 	.table-wrap-v2 th,
-	.table-wrap-v2 td { border-bottom: 1px solid var(--app-border); padding: 12px 18px; text-align: left; }
-	.table-wrap-v2 th { background: var(--app-surface-muted); color: var(--app-muted); font-family: var(--font-mono); font-size: 0.6rem; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
-	.table-wrap-v2 tbody tr:last-child td { border-bottom: 0; }
-	.table-wrap-v2 tbody tr:hover { background: color-mix(in oklch, var(--app-fg) 5%, transparent); }
-	.table-wrap-v2 td { font-family: var(--font-mono); font-size: 0.7rem; }
+	.table-wrap-v2 td {
+		border-bottom: 1px solid var(--app-border);
+		padding: 12px 18px;
+		text-align: left;
+	}
+	.table-wrap-v2 th {
+		background: var(--app-surface-muted);
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
+		font-weight: 650;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+	}
+	.table-wrap-v2 tbody tr:last-child td {
+		border-bottom: 0;
+	}
+	.table-wrap-v2 tbody tr:hover {
+		background: color-mix(in oklch, var(--app-fg) 5%, transparent);
+	}
+	.table-wrap-v2 td {
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
+	}
 	.table-wrap-v2 th:not(:first-child),
-	.table-wrap-v2 td:not(:first-child) { text-align: right; }
-	.table-wrap-v2 td:first-child { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.table-wrap-v2 td:first-child a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-	.latency-v2 { color: var(--app-warning); font-weight: 650; }
-	.table-empty-v2 { color: var(--app-muted); padding-block: 30px !important; text-align: center !important; }
+	.table-wrap-v2 td:not(:first-child) {
+		text-align: right;
+	}
+	.table-wrap-v2 td:first-child {
+		max-width: 380px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.table-wrap-v2 td:first-child a:hover {
+		text-decoration: underline;
+		text-underline-offset: 0.2em;
+	}
+	.latency-v2 {
+		color: var(--app-warning);
+		font-weight: 650;
+	}
+	.table-empty-v2 {
+		color: var(--app-muted);
+		padding-block: 30px !important;
+		text-align: center !important;
+	}
 
-	.support-grid-v2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-	.compact-list-v2 { margin: 0; padding: 6px 18px 8px; list-style: none; }
-	.compact-list-v2 li { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 42px; align-items: center; gap: 10px; border-bottom: 1px solid var(--app-border); }
-	.compact-list-v2 li:last-child { border-bottom: 0; }
+	.support-grid-v2 {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 16px;
+	}
+	.compact-list-v2 {
+		margin: 0;
+		padding: 6px 18px 8px;
+		list-style: none;
+	}
+	.compact-list-v2 li {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		min-height: 42px;
+		align-items: center;
+		gap: 10px;
+		border-bottom: 1px solid var(--app-border);
+	}
+	.compact-list-v2 li:last-child {
+		border-bottom: 0;
+	}
 	.compact-list-v2 a,
 	.compact-list-v2 button,
-	.compact-list-v2 li > span:first-child { min-width: 0; overflow: hidden; color: var(--app-fg); font-family: var(--font-mono); font-size: 0.68rem; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
-	.compact-list-v2 button { min-height: 36px; border: 0; background: transparent; padding: 0; }
+	.compact-list-v2 li > span:first-child {
+		min-width: 0;
+		overflow: hidden;
+		color: var(--app-fg);
+		font-family: var(--font-mono);
+		font-size: 0.68rem;
+		text-align: left;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.compact-list-v2 button {
+		min-height: 36px;
+		border: 0;
+		background: transparent;
+		padding: 0;
+	}
 	.compact-list-v2 a:hover,
-	.compact-list-v2 button:hover { text-decoration: underline; text-underline-offset: 0.2em; }
-	.compact-list-v2 li > span:last-child { color: var(--app-muted); font-family: var(--font-mono); font-size: 0.66rem; }
+	.compact-list-v2 button:hover {
+		text-decoration: underline;
+		text-underline-offset: 0.2em;
+	}
+	.compact-list-v2 li > span:last-child {
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.66rem;
+	}
 
 	@media (max-width: 1120px) {
 		.dashboard-span-4,
-		.dashboard-span-8 { grid-column: 1 / -1; }
-		.support-grid-v2 { grid-template-columns: 1fr 1fr; }
+		.dashboard-span-8 {
+			grid-column: 1 / -1;
+		}
+		.support-grid-v2 {
+			grid-template-columns: 1fr 1fr;
+		}
 	}
 
 	@media (max-width: 800px) {
-		.dashboard-span-6 { grid-column: 1 / -1; }
-		.support-grid-v2 { grid-template-columns: 1fr; }
-		.overview-actions-v2 { width: 100%; flex-wrap: wrap; }
+		.dashboard-span-6 {
+			grid-column: 1 / -1;
+		}
+		.support-grid-v2 {
+			grid-template-columns: 1fr;
+		}
+		.overview-actions-v2 {
+			width: 100%;
+			flex-wrap: wrap;
+		}
 	}
 
 	@media (max-width: 560px) {
-		.auto-refresh-option-v2 { width: 100%; justify-content: space-between; }
-		.table-header-v2 { align-items: flex-start; flex-direction: column; }
+		.auto-refresh-option-v2 {
+			width: 100%;
+			justify-content: space-between;
+		}
+		.table-header-v2 {
+			align-items: flex-start;
+			flex-direction: column;
+		}
 		.filter-field-v2,
-		.filter-field-v2 input { width: 100%; }
-		.chart-frame-v2 { height: 250px; padding-inline: 10px; }
+		.filter-field-v2 input {
+			width: 100%;
+		}
+		.chart-frame-v2 {
+			height: 250px;
+			padding-inline: 10px;
+		}
 	}
 </style>
