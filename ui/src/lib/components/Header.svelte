@@ -1,5 +1,8 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { resolve } from '$app/paths';
+	import { Toggle } from 'bits-ui';
 	import { theme } from '$lib/theme.svelte';
 	import { anonymize } from '$lib/anonymize.svelte';
 	import { auth } from '$lib/auth.svelte';
@@ -11,87 +14,330 @@
 		{ href: '/graphs', label: 'Graphs' },
 		{ href: '/map', label: 'Map' },
 		{ href: '/reports', label: 'Reports' }
-	];
+	] as const;
 
-	let now = $state(new Date());
-	$effect(() => {
-		const id = setInterval(() => { now = new Date(); }, 1000);
+	let timeLabel = $state('—:—:—');
+
+	onMount(() => {
+		const update = () => {
+			timeLabel = new Date().toLocaleTimeString([], {
+				hour: '2-digit',
+				minute: '2-digit',
+				second: '2-digit'
+			});
+		};
+		update();
+		const id = setInterval(update, 1000);
 		return () => clearInterval(id);
 	});
 </script>
 
-<header class="border-b border-neutral-200 px-6 py-4 dark:border-white/10">
-	<nav class="container mx-auto flex items-center gap-8">
-		<span class="font-bold">Caddy Dashboard</span>
-		{#each links as link}
-			<a
-				href={link.href}
-				class="text-sm transition-colors {page.url.pathname === link.href
-					? ''
-					: 'text-neutral-500 hover:text-neutral-700 dark:text-white/50 dark:hover:text-white/80'}"
-			>
-				{link.label}
-			</a>
-		{/each}
-		<div class="ml-auto flex items-center gap-3">
-			<span class="font-mono text-xs tabular-nums text-neutral-400 dark:text-white/30">{now.toLocaleTimeString()}</span>
+<header class="app-header">
+	<div class="header-inner">
+		<a class="brand-block" href={resolve('/')} aria-label="Caddy Dashboard overview">
+			<span class="brand-mark" aria-hidden="true">C</span>
+			<span>
+				<strong>Caddy</strong>
+				<small>Dashboard</small>
+			</span>
+		</a>
+
+		<nav class="primary-nav" aria-label="Primary navigation">
+			{#each links as link (link.href)}
+				{@const active = page.url.pathname === link.href}
+				<a href={resolve(link.href)} class:active aria-current={active ? 'page' : undefined}>
+					{link.label}
+				</a>
+			{/each}
+		</nav>
+
+		<div class="header-actions">
+			<span class="header-clock">{timeLabel}</span>
 			<ThemePicker />
-			<!-- Anonymize toggle -->
-			<button
-				onclick={anonymize.toggle}
-				aria-label="Toggle anonymize mode"
+
+			<Toggle.Root
+				pressed={anonymize.on}
+				onPressedChange={(pressed) => {
+					if (pressed !== anonymize.on) anonymize.toggle();
+				}}
+				aria-label={anonymize.on ? 'Disable anonymize mode' : 'Enable anonymize mode'}
 				title={anonymize.on ? 'Anonymize on' : 'Anonymize off'}
-				class="rounded-lg border p-2 transition-colors {anonymize.on
-					? 'border-amber-400 bg-amber-100 text-amber-600 dark:border-amber-500/60 dark:bg-amber-500/20 dark:text-amber-400'
-					: 'border-neutral-200 text-neutral-500 hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/10'}"
+				class="icon-button"
 			>
-				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+				<svg
+					aria-hidden="true"
+					width="17"
+					height="17"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="1.8"
+				>
+					<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+					<path d="M9.5 12.5 11 14l3.5-4" />
 				</svg>
-			</button>
-			<!-- Theme toggle -->
-			<button
-				onclick={theme.toggle}
-				class="rounded-lg border border-neutral-200 p-2 text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/10"
-				aria-label="Toggle theme"
+			</Toggle.Root>
+
+			<Toggle.Root
+				pressed={theme.dark}
+				onPressedChange={(pressed) => {
+					if (pressed !== theme.dark) theme.toggle();
+				}}
+				aria-label={theme.dark ? 'Use light appearance' : 'Use dark appearance'}
+				title={theme.dark ? 'Dark appearance' : 'Light appearance'}
+				class="icon-button"
 			>
 				{#if theme.dark}
-					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<circle cx="12" cy="12" r="4"/>
-						<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+					<svg
+						aria-hidden="true"
+						width="17"
+						height="17"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+					>
+						<circle cx="12" cy="12" r="4" />
+						<path
+							d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+						/>
 					</svg>
 				{:else}
-					<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+					<svg
+						aria-hidden="true"
+						width="17"
+						height="17"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
+					>
+						<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
 					</svg>
 				{/if}
-			</button>
-			<!-- User section -->
+			</Toggle.Root>
+
 			{#if auth.user}
-				<div class="flex items-center gap-2 border-l border-neutral-200 pl-3 dark:border-white/10">
-					<span class="text-xs text-neutral-500 dark:text-white/50">{auth.user.username}</span>
-					<a
-						href="/settings"
-						aria-label="Settings"
-						title="Settings"
-						class="rounded-lg border border-neutral-200 p-2 text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/10 {page.url.pathname === '/settings' ? 'bg-neutral-100 dark:bg-white/10' : ''}"
+				<span class="user-name">{auth.user.username}</span>
+				<a
+					href={resolve('/settings')}
+					aria-label="Settings"
+					title="Settings"
+					class="icon-button"
+					class:current-control={page.url.pathname === '/settings'}
+				>
+					<svg
+						aria-hidden="true"
+						width="17"
+						height="17"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-						</svg>
-					</a>
-					<button
-						onclick={() => auth.logout()}
-						aria-label="Sign out"
-						title="Sign out"
-						class="rounded-lg border border-neutral-200 p-2 text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/10"
+						<circle cx="12" cy="12" r="3" />
+						<path
+							d="M19.4 15a1.7 1.7 0 0 0 .34 1.85l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05a1.7 1.7 0 0 0-1.85-.34 1.7 1.7 0 0 0-1.06 1.57V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.06-1.57 1.7 1.7 0 0 0-1.85.34l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.85l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 8.94 4.6 1.7 1.7 0 0 0 10 3.09V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.06 1.51 1.7 1.7 0 0 0 1.85-.34l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9c.2.62.8 1 1.51 1H21a2 2 0 1 1 0 4h-.09c-.7 0-1.3.38-1.51 1z"
+						/>
+					</svg>
+				</a>
+				<button
+					onclick={() => auth.logout()}
+					aria-label="Sign out"
+					title="Sign out"
+					class="icon-button"
+				>
+					<svg
+						aria-hidden="true"
+						width="17"
+						height="17"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="1.8"
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-						</svg>
-					</button>
-				</div>
+						<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+					</svg>
+				</button>
 			{/if}
 		</div>
-	</nav>
+	</div>
 </header>
+
+<style>
+	.app-header {
+		position: sticky;
+		top: 0;
+		z-index: 40;
+		border-bottom: 1px solid var(--app-border);
+		background: color-mix(in oklch, var(--app-bg) 90%, transparent);
+		backdrop-filter: blur(18px) saturate(1.2);
+	}
+
+	.header-inner {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		max-width: 1240px;
+		min-height: 68px;
+		margin-inline: auto;
+		padding-inline: 28px;
+		gap: 28px;
+	}
+
+	.brand-block {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		color: var(--app-fg);
+		text-decoration: none;
+	}
+
+	.brand-mark {
+		display: grid;
+		width: 34px;
+		height: 34px;
+		place-items: center;
+		border-radius: 10px;
+		background: var(--app-fg);
+		color: var(--app-bg);
+		font-family: var(--font-mono);
+		font-size: 0.9rem;
+		font-weight: 700;
+	}
+
+	.brand-block strong,
+	.brand-block small {
+		display: block;
+		line-height: 1.05;
+	}
+
+	.brand-block strong {
+		font-size: 0.9rem;
+		font-weight: 720;
+		letter-spacing: -0.02em;
+	}
+
+	.brand-block small {
+		margin-top: 3px;
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.62rem;
+		letter-spacing: 0.03em;
+	}
+
+	.primary-nav {
+		display: flex;
+		align-items: stretch;
+		align-self: stretch;
+		overflow-x: auto;
+		gap: 2px;
+		scrollbar-width: none;
+	}
+
+	.primary-nav::-webkit-scrollbar {
+		display: none;
+	}
+
+	.primary-nav a {
+		position: relative;
+		display: inline-flex;
+		min-width: max-content;
+		align-items: center;
+		padding-inline: 13px;
+		color: var(--app-muted);
+		font-size: 0.84rem;
+		font-weight: 560;
+		text-decoration: none;
+		transition: color 150ms ease;
+	}
+
+	.primary-nav a::after {
+		position: absolute;
+		right: 13px;
+		bottom: -1px;
+		left: 13px;
+		height: 2px;
+		transform: scaleX(0);
+		background: var(--app-accent);
+		content: '';
+		transition: transform 150ms ease;
+	}
+
+	.primary-nav a:hover,
+	.primary-nav a.active {
+		color: var(--app-fg);
+	}
+
+	.primary-nav a.active::after {
+		transform: scaleX(1);
+	}
+
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.header-clock {
+		margin-right: 4px;
+		color: var(--app-muted);
+		font-family: var(--font-mono);
+		font-size: 0.68rem;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.user-name {
+		max-width: 120px;
+		overflow: hidden;
+		margin-left: 3px;
+		color: var(--app-muted);
+		font-size: 0.74rem;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.current-control {
+		border-color: var(--app-accent);
+		background: var(--app-accent-soft);
+		color: var(--app-accent-strong);
+	}
+
+	@media (max-width: 920px) {
+		.header-inner {
+			grid-template-columns: 1fr auto;
+			padding: 10px 16px 0;
+			gap: 8px 16px;
+		}
+
+		.primary-nav {
+			grid-column: 1 / -1;
+			order: 3;
+			min-height: 46px;
+		}
+
+		.primary-nav a {
+			padding-inline: 12px;
+		}
+
+		.header-clock,
+		.user-name {
+			display: none;
+		}
+	}
+
+	@media (max-width: 520px) {
+		.header-actions {
+			gap: 5px;
+		}
+
+		.brand-block small {
+			display: none;
+		}
+
+		.header-actions :global(.icon-button) {
+			width: 44px;
+			min-height: 44px;
+		}
+	}
+</style>

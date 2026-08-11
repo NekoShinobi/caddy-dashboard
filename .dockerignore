@@ -1,0 +1,36 @@
+.git
+.gitignore
+.github
+
+# Rust build output
+target/
+
+# Frontend dependencies and generated output
+ui/node_modules/
+ui/.svelte-kit/
+ui/build/
+
+# Local dev artifacts — the image builds its own copies
+static/
+data/
+ui/data/
+*.log
+
+# Local environment and compose overrides
+.env
+.env.*
+!.env.example
+compose.yml
+compose.dev.yml
+# Note: docker-entrypoint.sh is deliberately NOT ignored — Dockerfile.dev
+# copies it into the development image.
+
+# Editor and OS metadata
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Note: .dbip-cache/ is deliberately NOT ignored. build.rs reads it to avoid
+# re-downloading the GeoIP database on every image build.

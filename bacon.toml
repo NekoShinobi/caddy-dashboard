@@ -1,0 +1,33 @@
+# Bacon drives the backend development loop (`just dev-api`).
+# https://dystroy.org/bacon/
+
+default_job = "run"
+
+[jobs.check]
+command = ["cargo", "check", "--workspace", "--color", "always"]
+need_stdout = false
+
+[jobs.clippy]
+command = ["cargo", "clippy", "--workspace", "--all-targets", "--color", "always"]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "test", "--workspace", "--color", "always"]
+need_stdout = true
+
+# Rebuild and restart the server on every source change. `background = false`
+# keeps the server's own stdout streaming to the terminal, and
+# `kill_then_restart` guarantees the old process releases the port before the
+# new one binds it.
+[jobs.run]
+command = ["cargo", "run", "--color", "always"]
+need_stdout = true
+allow_warnings = true
+background = false
+on_change_strategy = "kill_then_restart"
+
+[keybindings]
+c = "job:check"
+l = "job:clippy"
+r = "job:run"
+t = "job:test"

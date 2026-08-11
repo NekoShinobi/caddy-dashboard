@@ -1,0 +1,40 @@
+# Development image for the Vite dev server (`just up-dev`).
+#
+# Bun stays the package manager, but Vite runs under Node. Bun's `node:http`
+# upgrade sockets accept writes and silently discard them, so anything relying
+# on a WebSocket through Vite hangs until the browser gives up with code 1006.
+# Vite is only tested against Node upstream, so this is the supported
+# combination rather than a workaround. `bun run build` is unaffected — a build
+# proxies nothing — which is why the production Dockerfile can stay on Bun.
+FROM node:24-bookworm-slim
+
+ARG DEV_UID=1000
+ARG DEV_GID=1000
+ENV DEV_UID=${DEV_UID}
+ENV DEV_GID=${DEV_GID}
+
+COPY --from=oven/bun:1.3.14 /usr/local/bin/bun /usr/local/bin/bun
+RUN ln -s /usr/local/bin/bun /usr/local/bin/bunx
+
+# gosu lets the entrypoint hand the named volumes over to the host user before
+# dropping privileges. Running as `user:` directly cannot work here: the volumes
+# are mounted root-owned and nothing would ever chown them.
+RUN apt-get update && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# node:24 ships a `node` user at uid 1000, so a host uid of 1000 collides.
+# --non-unique keeps useradd from failing on that.
+RUN if ! getent group "${DEV_GID}" >/dev/null; then groupadd --gid "${DEV_GID}" app; fi \
+    && if ! getent passwd "${DEV_UID}" >/dev/null; then \
+         useradd --uid "${DEV_UID}" --gid "${DEV_GID}" --create-home --non-unique app; \
+       fi \
+    && mkdir -p /app/ui /tmp/bun-cache \
+    && chown -R "${DEV_UID}:${DEV_GID}" /app /tmp/bun-cache
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+WORKDIR /app/ui
+EXPOSE 5173
+
+ENTRYPOINT ["docker-entrypoint.sh"]

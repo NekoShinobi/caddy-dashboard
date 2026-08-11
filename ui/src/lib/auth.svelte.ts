@@ -1,4 +1,4 @@
-import { hashPassword } from './crypto';
+import { hashPassword, validatePassword } from './crypto';
 
 export interface AuthUser {
 	username: string;
@@ -26,7 +26,7 @@ function createAuth() {
 		try {
 			const [meRes, oidcRes] = await Promise.all([
 				fetch('/api/auth/me'),
-				fetch('/api/auth/oidc/config'),
+				fetch('/api/auth/oidc/config')
 			]);
 			oidcConfig = await oidcRes.json().catch(() => null);
 			if (meRes.ok) {
@@ -69,6 +69,8 @@ function createAuth() {
 	}
 
 	async function signup(username: string, email: string, password: string): Promise<string | null> {
+		const invalid = validatePassword(password);
+		if (invalid) return invalid;
 		const res = await fetch('/api/auth/signup', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -87,6 +89,11 @@ function createAuth() {
 		currentPassword: string,
 		newPassword: string
 	): Promise<string | null> {
+		// Only the new password is checked: an account created before this was
+		// enforced may hold a shorter one, and it still has to authenticate here
+		// in order to replace it.
+		const invalid = validatePassword(newPassword);
+		if (invalid) return invalid;
 		const res = await fetch('/api/auth/password', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
@@ -101,14 +108,23 @@ function createAuth() {
 	}
 
 	return {
-		get user() { return user; },
-		get loading() { return loading; },
-		get needsSetup() { return needsSetup; },
-		get oidcConfig() { return oidcConfig; },
+		get user() {
+			return user;
+		},
+		get loading() {
+			return loading;
+		},
+		get needsSetup() {
+			return needsSetup;
+		},
+		get oidcConfig() {
+			return oidcConfig;
+		},
 		check,
 		login,
 		logout,
-		signup: (username: string, email: string, password: string) => signup(username, email, password),
+		signup: (username: string, email: string, password: string) =>
+			signup(username, email, password),
 		changePassword
 	};
 }

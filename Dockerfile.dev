@@ -1,0 +1,40 @@
+# Development image for the Rust API (`just up-dev`).
+#
+# Only the toolchain lives in the image — the sources arrive through a bind
+# mount, and `target/` plus the cargo registry are named volumes, so a rebuild
+# here never touches the host's own `./target`. Cargo takes a lock on a target
+# directory, so sharing one would make a host `just check` and this container's
+# bacon block each other.
+FROM rustlang/rust:nightly-slim
+
+ARG DEV_UID=1000
+ARG DEV_GID=1000
+
+# Baked in so the entrypoint can chown the cache volumes at runtime, before
+# dropping privileges. Docker creates named volumes owned by root.
+ENV DEV_UID=${DEV_UID}
+ENV DEV_GID=${DEV_GID}
+
+WORKDIR /app
+
+# ca-certificates: build.rs downloads the DB-IP GeoLite database over HTTPS.
+# gosu: drop from root to the host user in the entrypoint.
+# Every Rust dependency here is pure-Rust (rustls-tls, redb, maxminddb), so
+# there is no OpenSSL or other native library to install.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN cargo install --locked bacon
+
+RUN if ! getent group "${DEV_GID}" >/dev/null; then groupadd --gid "${DEV_GID}" app; fi \
+    && useradd --uid "${DEV_UID}" --gid "${DEV_GID}" --create-home --non-unique app \
+    && mkdir -p /app/target /usr/local/cargo/registry /usr/local/cargo/git \
+    && chown -R "${DEV_UID}:${DEV_GID}" /app /usr/local/cargo
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 9080
+
+ENTRYPOINT ["docker-entrypoint.sh"]

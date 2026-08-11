@@ -1,4 +1,4 @@
-use actix_web::{delete, get, post, put, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, delete, get, post, put, web};
 use redb::Database;
 use serde::{Deserialize, Serialize};
 
@@ -12,13 +12,13 @@ struct UserRow {
 }
 
 fn require_admin(req: &HttpRequest, db: &Database) -> Result<crate::auth::User, HttpResponse> {
-    let username = crate::session::get_username(req, db)
-        .ok_or_else(|| HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"})))?;
-    let user = crate::db::get_user(db, &username)
-        .ok_or_else(|| {
-            log::error!("require_admin: session valid but user '{username}' not found in DB");
-            HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}))
-        })?;
+    let username = crate::session::get_username(req, db).ok_or_else(|| {
+        HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}))
+    })?;
+    let user = crate::db::get_user(db, &username).ok_or_else(|| {
+        log::error!("require_admin: session valid but user '{username}' not found in DB");
+        HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}))
+    })?;
     if !user.is_admin {
         log::warn!("require_admin: user '{username}' attempted admin action without admin rights");
         return Err(HttpResponse::Forbidden().json(serde_json::json!({"error": "Admin required"})));
@@ -28,12 +28,20 @@ fn require_admin(req: &HttpRequest, db: &Database) -> Result<crate::auth::User, 
 
 #[get("/admin/users")]
 pub async fn list_users(req: HttpRequest, db: web::Data<Database>) -> HttpResponse {
-    if let Err(e) = require_admin(&req, &db) { return e; }
+    if let Err(e) = require_admin(&req, &db) {
+        return e;
+    }
     let users: Vec<UserRow> = crate::db::list_users(&db)
         .into_iter()
         .map(|u| {
             let is_oidc = u.password_hash.starts_with("oidc:");
-            UserRow { username: u.username, email: u.email, is_admin: u.is_admin, created_at: u.created_at, is_oidc }
+            UserRow {
+                username: u.username,
+                email: u.email,
+                is_admin: u.is_admin,
+                created_at: u.created_at,
+                is_oidc,
+            }
         })
         .collect();
     HttpResponse::Ok().json(serde_json::json!({"users": users}))
@@ -53,21 +61,30 @@ pub async fn create_user(
     db: web::Data<Database>,
     body: web::Json<CreateUserBody>,
 ) -> HttpResponse {
-    let admin = match require_admin(&req, &db) { Ok(u) => u, Err(e) => return e };
+    let admin = match require_admin(&req, &db) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
     if body.username.trim().is_empty() {
         return HttpResponse::BadRequest().json(serde_json::json!({"error": "Username required"}));
     }
     if crate::db::get_user(&db, body.username.trim()).is_some() {
-        return HttpResponse::Conflict().json(serde_json::json!({"error": "Username already exists"}));
+        return HttpResponse::Conflict()
+            .json(serde_json::json!({"error": "Username already exists"}));
     }
     if body.password.len() < 8 {
-        return HttpResponse::BadRequest().json(serde_json::json!({"error": "Password must be at least 8 characters"}));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({"error": "Password must be at least 8 characters"}));
     }
     let hash = match crate::auth::hash_password(&body.password) {
         Ok(h) => h,
         Err(e) => {
-            log::error!("admin create_user({}): hash_password failed: {e}", body.username);
-            return HttpResponse::InternalServerError().json(serde_json::json!({"error": "Internal error"}));
+            log::error!(
+                "admin create_user({}): hash_password failed: {e}",
+                body.username
+            );
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Internal error"}));
         }
     };
     let now = std::time::SystemTime::now()
@@ -83,9 +100,14 @@ pub async fn create_user(
     };
     if !crate::db::create_user(&db, &user) {
         log::error!("admin create_user({}): DB write failed", user.username);
-        return HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to create user"}));
+        return HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": "Failed to create user"}));
     }
-    log::info!("admin '{}': created user '{}'", admin.username, user.username);
+    log::info!(
+        "admin '{}': created user '{}'",
+        admin.username,
+        user.username
+    );
     HttpResponse::Created().json(serde_json::json!({"ok": true, "username": user.username}))
 }
 
@@ -101,7 +123,8 @@ pub async fn delete_user(
     };
     let target = path.into_inner();
     if target == admin.username {
-        return HttpResponse::BadRequest().json(serde_json::json!({"error": "Cannot delete your own account"}));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({"error": "Cannot delete your own account"}));
     }
     if crate::db::get_user(&db, &target).is_none() {
         return HttpResponse::NotFound().json(serde_json::json!({"error": "User not found"}));
@@ -111,7 +134,8 @@ pub async fn delete_user(
     if target_user.map(|u| u.is_admin).unwrap_or(false) {
         let admin_count = users.iter().filter(|u| u.is_admin).count();
         if admin_count <= 1 {
-            return HttpResponse::BadRequest().json(serde_json::json!({"error": "Cannot delete the last admin"}));
+            return HttpResponse::BadRequest()
+                .json(serde_json::json!({"error": "Cannot delete the last admin"}));
         }
     }
     crate::db::delete_user_sessions(&db, &target);
@@ -145,7 +169,10 @@ pub async fn edit_user(
 
     if let Some(new_admin) = body.is_admin {
         if user.is_admin && !new_admin {
-            let admin_count = crate::db::list_users(&db).iter().filter(|u| u.is_admin).count();
+            let admin_count = crate::db::list_users(&db)
+                .iter()
+                .filter(|u| u.is_admin)
+                .count();
             if admin_count <= 1 {
                 return HttpResponse::BadRequest()
                     .json(serde_json::json!({"error": "Cannot remove the last admin"}));
@@ -180,14 +207,21 @@ pub async fn edit_user(
         return HttpResponse::InternalServerError()
             .json(serde_json::json!({"error": "Failed to update user"}));
     }
-    log::info!("admin '{}': edited user '{old_username}' -> '{}'", admin.username, user.username);
+    log::info!(
+        "admin '{}': edited user '{old_username}' -> '{}'",
+        admin.username,
+        user.username
+    );
 
     if username_changed {
         crate::db::delete_user_sessions(&db, &old_username);
         if old_username == admin.username {
             let token = crate::session::generate_token();
             if !crate::db::create_session(&db, &token, &user.username) {
-                log::error!("edit_user: failed to create new session for renamed admin '{}'", user.username);
+                log::error!(
+                    "edit_user: failed to create new session for renamed admin '{}'",
+                    user.username
+                );
                 return HttpResponse::InternalServerError()
                     .json(serde_json::json!({"error": "Failed to create session"}));
             }
@@ -212,9 +246,13 @@ pub async fn reset_password(
     path: web::Path<String>,
     body: web::Json<ResetPasswordBody>,
 ) -> HttpResponse {
-    let admin = match require_admin(&req, &db) { Ok(u) => u, Err(e) => return e };
+    let admin = match require_admin(&req, &db) {
+        Ok(u) => u,
+        Err(e) => return e,
+    };
     if body.new_password.len() < 8 {
-        return HttpResponse::BadRequest().json(serde_json::json!({"error": "Password must be at least 8 characters"}));
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({"error": "Password must be at least 8 characters"}));
     }
     let username = path.into_inner();
     if crate::db::get_user(&db, &username).is_none() {
@@ -224,14 +262,19 @@ pub async fn reset_password(
         Ok(h) => h,
         Err(e) => {
             log::error!("admin reset_password({username}): hash_password failed: {e}");
-            return HttpResponse::InternalServerError().json(serde_json::json!({"error": "Internal error"}));
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "Internal error"}));
         }
     };
     if !crate::db::update_password(&db, &username, &hash) {
         log::error!("admin reset_password({username}): DB write failed");
-        return HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to update password"}));
+        return HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": "Failed to update password"}));
     }
     crate::db::delete_user_sessions(&db, &username);
-    log::info!("admin '{}': reset password for '{username}'", admin.username);
+    log::info!(
+        "admin '{}': reset password for '{username}'",
+        admin.username
+    );
     HttpResponse::Ok().json(serde_json::json!({"ok": true}))
 }

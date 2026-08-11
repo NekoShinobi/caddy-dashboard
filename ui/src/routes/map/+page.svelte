@@ -1,13 +1,27 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { COUNTRY_COORDS } from '$lib/countries';
 	import { timeRange } from '$lib/time-range.svelte';
 	import TimeRangeSelector from '$lib/components/TimeRangeSelector.svelte';
+	import SegmentedControl from '$lib/components/SegmentedControl.svelte';
+	import AppDialog from '$lib/components/AppDialog.svelte';
 	import { anonymize } from '$lib/anonymize.svelte';
+	import { colorTheme } from '$lib/color-theme.svelte';
+	import { theme } from '$lib/theme.svelte';
 	import type { Map, CircleMarker } from 'leaflet';
 
-	interface CountryCount { country: string; count: number; top_ips: string[]; }
-	interface PrecisePoint { lat: number; lng: number; count: number; top_ips: string[]; }
+	interface CountryCount {
+		country: string;
+		count: number;
+		top_ips: string[];
+	}
+	interface PrecisePoint {
+		lat: number;
+		lng: number;
+		count: number;
+		top_ips: string[];
+	}
 	type GeoMode = 'country' | 'cluster';
 
 	interface SelectedPoint {
@@ -15,6 +29,11 @@
 		count: number;
 		ips: string[];
 	}
+
+	const modeOptions = [
+		{ label: 'Countries', value: 'country' },
+		{ label: 'Clusters', value: 'cluster' }
+	];
 
 	let L: typeof import('leaflet') | null = null;
 	let mapEl = $state<HTMLDivElement | null>(null);
@@ -28,18 +47,23 @@
 	let noGeoip = $state(false);
 	let selectedPoint = $state<SelectedPoint | null>(null);
 
+	function accent() {
+		return colorTheme.theme[theme.dark ? 'dark' : 'light'].blue;
+	}
+
 	function clusterIcon(count: number) {
 		const size = Math.round(Math.min(56, 28 + Math.log1p(count) * 4));
 		const half = size / 2;
+		const clusterAccent = accent();
 		return L!.divIcon({
-			html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:rgba(59,130,246,0.85);border:2px solid rgba(59,130,246,1);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:600;font-family:monospace">${count >= 1000 ? (count / 1000).toFixed(1) + 'k' : count}</div>`,
+			html: `<div class="request-cluster" style="width:${size}px;height:${size}px;background:${clusterAccent};border-color:${clusterAccent}">${count >= 1000 ? (count / 1000).toFixed(1) + 'k' : count}</div>`,
 			className: '',
 			iconSize: [size, size],
 			iconAnchor: [half, half]
 		});
 	}
 
-	async function fetchAndPlot(m: GeoMode = mode) {
+	async function fetchAndPlot(nextMode: GeoMode = mode) {
 		if (!leafletMap || !L) return;
 		loading = true;
 		error = '';
@@ -49,17 +73,20 @@
 			const params = new URLSearchParams();
 			const since = timeRange.sinceParam();
 			if (since) params.set('since', since);
-			if (m === 'cluster') params.set('mode', 'precise');
+			if (nextMode === 'cluster') params.set('mode', 'precise');
 			const res = await fetch(`/api/geo${params.size ? `?${params}` : ''}`);
 			if (!res.ok) {
-				const d = await res.json().catch(() => ({}));
-				throw new Error(d.error ?? `HTTP ${res.status}`);
+				const response = await res.json().catch(() => ({}));
+				throw new Error(response.error ?? `HTTP ${res.status}`);
 			}
 			const json = await res.json();
 
-			markers.forEach((mk) => mk.remove());
+			markers.forEach((marker) => marker.remove());
 			markers = [];
-			if (clusterGroup) { leafletMap!.removeLayer(clusterGroup); clusterGroup = null; }
+			if (clusterGroup) {
+				leafletMap.removeLayer(clusterGroup);
+				clusterGroup = null;
+			}
 
 			if (json.mode === 'precise') {
 				const raw: PrecisePoint[] = json.points;
@@ -67,67 +94,70 @@
 					clusterGroup = L.markerClusterGroup({
 						maxClusterRadius: 60,
 						iconCreateFunction: (cluster: any) => {
-							const total: number = cluster.getAllChildMarkers()
-								.reduce((s: number, mk: any) => s + (mk._weight ?? 1), 0);
+							const total: number = cluster
+								.getAllChildMarkers()
+								.reduce((sum: number, marker: any) => sum + (marker._weight ?? 1), 0);
 							return clusterIcon(total);
 						},
 						spiderfyOnMaxZoom: true,
 						showCoverageOnHover: false
 					});
 
-					for (const pt of raw) {
-						const w = pt.count;
-						const r = Math.min(18, 6 + Math.log1p(w) * 2);
-						const mk: any = L.circleMarker([pt.lat, pt.lng], {
-							radius: r,
-							color: '#2563eb',
-							fillColor: '#3b82f6',
-							fillOpacity: 0.75,
+					for (const point of raw) {
+						const radius = Math.min(18, 6 + Math.log1p(point.count) * 2);
+						const marker: any = L.circleMarker([point.lat, point.lng], {
+							radius,
+							color: accent(),
+							fillColor: accent(),
+							fillOpacity: 0.7,
 							weight: 1.5
 						})
-							.bindTooltip(`${w.toLocaleString()} requests`)
+							.bindTooltip(`${point.count.toLocaleString()} requests`)
 							.on('click', () => {
 								selectedPoint = {
-									label: `${pt.lat.toFixed(2)}, ${pt.lng.toFixed(2)}`,
-									count: w,
-									ips: pt.top_ips
+									label: `${point.lat.toFixed(2)}, ${point.lng.toFixed(2)}`,
+									count: point.count,
+									ips: point.top_ips
 								};
 							});
-						mk._weight = w;
-						clusterGroup.addLayer(mk);
+						marker._weight = point.count;
+						clusterGroup.addLayer(marker);
 					}
 
-					leafletMap!.addLayer(clusterGroup);
+					leafletMap.addLayer(clusterGroup);
 				}
 			} else {
 				data = json.data ?? [];
-				const maxCount = Math.max(...data.map((d) => d.count), 1);
+				const maxCount = Math.max(...data.map((entry) => entry.count), 1);
 				for (const { country, count, top_ips } of data) {
 					const coords = COUNTRY_COORDS[country];
 					if (!coords) continue;
-					const marker = L!.circleMarker(coords, {
+					const marker = L.circleMarker(coords, {
 						radius: 6 + (count / maxCount) * 30,
-						color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.5, weight: 1
+						color: accent(),
+						fillColor: accent(),
+						fillOpacity: 0.48,
+						weight: 1.5
 					})
 						.bindTooltip(`<strong>${country}</strong><br/>${count.toLocaleString()} requests`)
 						.on('click', () => {
 							selectedPoint = { label: country, count, ips: top_ips };
 						})
-						.addTo(leafletMap!);
+						.addTo(leafletMap);
 					markers.push(marker);
 				}
-				if (m === 'cluster') noGeoip = true;
+				if (nextMode === 'cluster') noGeoip = true;
 			}
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to fetch geo data';
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'Failed to fetch geo data';
 		} finally {
 			loading = false;
 		}
 	}
 
-	async function setMode(m: GeoMode) {
-		mode = m;
-		await fetchAndPlot(m);
+	function changeMode(value: string) {
+		mode = value as GeoMode;
+		void fetchAndPlot(mode);
 	}
 
 	async function initMap() {
@@ -142,8 +172,11 @@
 			zoomControl: true,
 			scrollWheelZoom: true,
 			minZoom: 2,
-			maxBounds: [[-90, -180], [90, 180]],
-			maxBoundsViscosity: 1.0
+			maxBounds: [
+				[-90, -180],
+				[90, 180]
+			],
+			maxBoundsViscosity: 1
 		}).setView([20, 0], 2);
 
 		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -154,100 +187,232 @@
 	}
 
 	onMount(initMap);
-	onDestroy(() => { leafletMap?.remove(); leafletMap = null; });
+	onDestroy(() => {
+		leafletMap?.remove();
+		leafletMap = null;
+	});
 </script>
 
-<svelte:head>
-	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-</svelte:head>
-
-<div class="mx-auto max-w-6xl space-y-6">
-	<div class="flex flex-wrap items-end justify-between gap-4">
+<div class="page-shell" data-od-id="map-page">
+	<header class="page-header" data-od-id="map-header">
 		<div>
-			<h1 class="text-3xl font-bold">Map</h1>
-			<p class="mt-1 text-neutral-500 dark:text-white/50">Request origins</p>
+			<p class="page-eyebrow">Geography</p>
+			<h1 class="page-title">Request map</h1>
+			<p class="page-description">
+				Locate traffic concentration and investigate the clients behind each region.
+			</p>
 		</div>
-		<div class="flex items-center gap-3">
-			<div class="flex gap-1">
-				{#each (['country', 'cluster'] as GeoMode[]) as m}
-					<button
-						onclick={() => setMode(m)}
-						class="rounded-lg border px-3 py-1.5 text-sm capitalize transition-colors {mode === m
-							? 'border-neutral-400 bg-neutral-200 dark:border-white/30 dark:bg-white/10'
-							: 'border-neutral-200 hover:bg-neutral-100 dark:border-white/10 dark:hover:bg-white/5'}"
-					>{m}</button>
-				{/each}
-			</div>
+		<div class="flex flex-wrap items-center gap-3">
+			<SegmentedControl
+				value={mode}
+				options={modeOptions}
+				onchange={changeMode}
+				label="Map resolution"
+			/>
 			<TimeRangeSelector onchange={() => fetchAndPlot(mode)} />
 		</div>
-	</div>
+	</header>
 
 	{#if error}
-		<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">{error}</div>
+		<div class="status-alert status-alert-error" role="alert">{error}</div>
 	{/if}
 
 	{#if noGeoip}
-		<div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-400">
-			Cluster view requires a GeoIP database. Set <code class="font-mono">GEOIP_DB</code> to the path of a MaxMind GeoLite2-City or DB-IP Lite City <code class="font-mono">.mmdb</code> file. Showing country view as fallback.
+		<div class="status-alert status-alert-warning" role="status">
+			<div>
+				<strong>Precise clustering is unavailable.</strong>
+				<p>
+					Set <code>GEOIP_DB</code> to a MaxMind GeoLite2-City or DB-IP Lite City <code>.mmdb</code> file.
+					Country-level data is shown instead.
+				</p>
+			</div>
 		</div>
 	{/if}
 
-	<div class="isolate overflow-hidden rounded-lg border border-neutral-200 dark:border-white/10">
-		<div bind:this={mapEl} class="h-[500px] w-full"></div>
-	</div>
-
-	{#if mode === 'country' && !loading && data.length > 0}
-		<div class="rounded-lg border border-neutral-200 bg-neutral-100 p-6 dark:border-white/10 dark:bg-white/5">
-			<h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-neutral-500 dark:text-white/50">Requests by Country</h2>
-			<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-				{#each data as { country, count }}
-					<div class="flex items-center justify-between rounded border border-neutral-200 px-3 py-2 dark:border-white/5">
-						<span class="font-mono text-sm font-semibold">{country}</span>
-						<span class="text-sm text-neutral-500 dark:text-white/50">{count.toLocaleString()}</span>
-					</div>
-				{/each}
+	<section class="panel map-shell" data-od-id="request-map">
+		<div
+			bind:this={mapEl}
+			class="h-[clamp(420px,62vh,680px)] w-full"
+			aria-label="Interactive request origin map"
+		></div>
+		{#if loading}
+			<div class="map-loading" role="status">
+				<span class="skeleton h-2 w-24"></span>
+				<span>Updating geography…</span>
 			</div>
-		</div>
+		{/if}
+	</section>
+
+	{#if mode === 'country' && !loading}
+		<section class="panel panel-pad" data-od-id="country-ranking">
+			<div class="section-heading">
+				<div>
+					<p class="page-eyebrow">Country ranking</p>
+					<h2>Requests by origin</h2>
+				</div>
+				<span class="count-badge">{data.length} countries</span>
+			</div>
+			{#if data.length === 0}
+				<div class="empty-state">
+					<strong>No geographic data</strong>
+					<span>Requests with a recognized country will appear here.</span>
+				</div>
+			{:else}
+				<div class="country-grid">
+					{#each data as entry (entry.country)}
+						<button
+							class="country-item"
+							onclick={() =>
+								(selectedPoint = { label: entry.country, count: entry.count, ips: entry.top_ips })}
+						>
+							<span class="font-mono font-semibold">{entry.country}</span>
+							<span class="font-mono text-sm text-[var(--app-muted-fg)]"
+								>{entry.count.toLocaleString()}</span
+							>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</section>
 	{/if}
 </div>
 
-<!-- Point / Country IP Modal -->
 {#if selectedPoint}
-	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
-		onclick={(e) => { if (e.target === e.currentTarget) selectedPoint = null; }}
+	<AppDialog
+		open={true}
+		onOpenChange={(open) => {
+			if (!open) selectedPoint = null;
+		}}
+		title={selectedPoint.label}
+		description={`${selectedPoint.count.toLocaleString()} requests in the selected period`}
+		size="sm"
 	>
-		<div class="flex max-h-[70vh] w-full max-w-sm flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl dark:border-white/10 dark:bg-neutral-900">
-			<div class="flex items-center justify-between border-b border-neutral-200 px-5 py-4 dark:border-white/10">
-				<div>
-					<div class="font-semibold">{selectedPoint.label}</div>
-					<div class="text-xs text-neutral-500 dark:text-white/40">{selectedPoint.count.toLocaleString()} requests</div>
-				</div>
-				<button onclick={() => selectedPoint = null} aria-label="Close" class="rounded-lg border border-neutral-200 p-1.5 text-neutral-500 transition-colors hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-				</button>
+		{#if selectedPoint.ips.length === 0}
+			<div class="empty-state">
+				<strong>No client details</strong>
+				<span>IP data is not available for this location.</span>
 			</div>
-			<div class="flex-1 overflow-y-auto p-4">
-				{#if selectedPoint.ips.length === 0}
-					<p class="text-center text-sm text-neutral-400 dark:text-white/30">No IP data available</p>
-				{:else}
-					<p class="mb-2 text-xs text-neutral-400 dark:text-white/30">Top IPs (up to 10)</p>
-					<ul class="space-y-1">
-						{#each selectedPoint.ips as ip}
-							<li>
-								<a
-									href="/logs?ip={encodeURIComponent(ip)}"
-									class="flex items-center justify-between rounded-lg border border-neutral-100 px-3 py-2 font-mono text-sm hover:bg-neutral-50 dark:border-white/5 dark:hover:bg-white/5"
-								>
-									<span class="{anonymize.on ? 'blur-sm select-none' : ''}">{ip}</span>
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-neutral-400 dark:text-white/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-								</a>
-							</li>
-						{/each}
-					</ul>
-				{/if}
+		{:else}
+			<div>
+				<p
+					class="mb-3 text-xs font-semibold tracking-[0.16em] text-[var(--app-muted-fg)] uppercase"
+				>
+					Top clients
+				</p>
+				<ul class="space-y-2">
+					{#each selectedPoint.ips as ip (ip)}
+						<li>
+							<a href={resolve(`/logs?ip=${encodeURIComponent(ip)}`)} class="client-link">
+								<span class="font-mono {anonymize.on ? 'blur-sm select-none' : ''}">{ip}</span>
+								<span aria-hidden="true">→</span>
+							</a>
+						</li>
+					{/each}
+				</ul>
 			</div>
-		</div>
-	</div>
+		{/if}
+	</AppDialog>
 {/if}
+
+<style>
+	.map-shell {
+		position: relative;
+		isolation: isolate;
+		overflow: hidden;
+		min-height: 420px;
+	}
+
+	.map-loading {
+		position: absolute;
+		inset: 1rem 1rem auto auto;
+		z-index: 500;
+		display: flex;
+		align-items: center;
+		gap: 0.65rem;
+		padding: 0.65rem 0.8rem;
+		border: 1px solid var(--app-border);
+		border-radius: var(--radius-sm);
+		background: color-mix(in oklch, var(--app-surface) 90%, transparent);
+		box-shadow: var(--shadow-soft);
+		font-size: 0.75rem;
+		color: var(--app-muted-fg);
+		backdrop-filter: blur(12px);
+	}
+
+	.country-grid {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.5rem;
+	}
+
+	.country-item,
+	.client-link {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		width: 100%;
+		min-height: 44px;
+		padding: 0.65rem 0.8rem;
+		border: 1px solid var(--app-border);
+		border-radius: var(--radius-sm);
+		background: var(--app-surface);
+		transition:
+			border-color 140ms ease,
+			background 140ms ease,
+			transform 140ms ease;
+	}
+
+	.country-item:hover,
+	.client-link:hover {
+		border-color: var(--app-border-strong);
+		background: var(--app-surface-muted);
+	}
+
+	.country-item:active,
+	.client-link:active {
+		transform: translateY(1px);
+	}
+
+	:global(.request-cluster) {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 2px solid;
+		border-radius: 999px;
+		color: white;
+		font:
+			600 0.7rem/1 ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			monospace;
+		box-shadow: 0 8px 18px oklch(0.12 0.02 230 / 0.22);
+	}
+
+	:global(.leaflet-container) {
+		background: var(--app-surface-muted);
+		font-family: inherit;
+	}
+
+	:global(.leaflet-control-zoom a),
+	:global(.leaflet-control-attribution) {
+		color: var(--app-fg);
+		background: color-mix(in oklch, var(--app-surface) 94%, transparent);
+	}
+
+	:global(.dark .leaflet-tile-pane) {
+		filter: grayscale(0.35) invert(0.9) hue-rotate(165deg) brightness(0.72) contrast(0.92);
+	}
+
+	@media (max-width: 820px) {
+		.country-grid {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	@media (max-width: 520px) {
+		.country-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>

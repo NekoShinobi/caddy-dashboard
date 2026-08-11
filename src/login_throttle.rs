@@ -6,7 +6,9 @@ pub struct LoginThrottle {
 
 impl LoginThrottle {
     pub fn new() -> Self {
-        Self { failures: Mutex::new(HashMap::new()) }
+        Self {
+            failures: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn record_failure(&self, username: &str) -> u32 {
@@ -21,6 +23,11 @@ impl LoginThrottle {
     }
 
     pub fn fail_count(&self, username: &str) -> u32 {
-        self.failures.lock().unwrap().get(username).copied().unwrap_or(0)
+        self.failures
+            .lock()
+            .unwrap()
+            .get(username)
+            .copied()
+            .unwrap_or(0)
     }
 }

@@ -66,9 +66,7 @@ impl UserInfo {
         // Check extra / provider-specific claims
         match self.extra.get(claim) {
             Some(serde_json::Value::String(s)) => s == want,
-            Some(serde_json::Value::Array(arr)) => {
-                arr.iter().any(|v| v.as_str() == Some(want))
-            }
+            Some(serde_json::Value::Array(arr)) => arr.iter().any(|v| v.as_str() == Some(want)),
             Some(serde_json::Value::Bool(b)) => want == (if *b { "true" } else { "false" }),
             _ => false,
         }
@@ -118,7 +116,10 @@ pub async fn exchange_code(
         ("grant_type", "authorization_code"),
         ("code", code),
         ("redirect_uri", redirect_uri),
-        ("client_id", crate::env::OIDC_CLIENT_ID.as_deref().unwrap_or("")),
+        (
+            "client_id",
+            crate::env::OIDC_CLIENT_ID.as_deref().unwrap_or(""),
+        ),
         ("client_secret", crate::env::OIDC_CLIENT_SECRET.as_str()),
     ];
     let resp = HTTP

@@ -1,5 +1,5 @@
-use actix_web::{get, web, HttpRequest, HttpResponse};
-use futures_util::{stream, StreamExt};
+use actix_web::{HttpRequest, HttpResponse, get, web};
+use futures_util::{StreamExt, stream};
 use redb::Database;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -51,7 +51,13 @@ fn build_prompt(db: &Database, since: Option<f64>) -> Result<String, &'static st
         *status_counts.entry(e.status).or_insert(0) += 1;
 
         // strip query string for path aggregation
-        let path = e.request.uri.split('?').next().unwrap_or(&e.request.uri).to_string();
+        let path = e
+            .request
+            .uri
+            .split('?')
+            .next()
+            .unwrap_or(&e.request.uri)
+            .to_string();
         *path_counts.entry(path.clone()).or_insert(0) += 1;
 
         let ip = if e.request.client_ip.is_empty() {
@@ -78,48 +84,84 @@ fn build_prompt(db: &Database, since: Option<f64>) -> Result<String, &'static st
         }
     }
 
-    let s2xx: usize = status_counts.iter().filter(|(k, _)| **k < 300).map(|(_, v)| v).sum();
-    let s3xx: usize = status_counts.iter().filter(|(k, _)| (300..400).contains(*k)).map(|(_, v)| v).sum();
-    let s4xx: usize = status_counts.iter().filter(|(k, _)| (400..500).contains(*k)).map(|(_, v)| v).sum();
-    let s5xx: usize = status_counts.iter().filter(|(k, _)| **k >= 500).map(|(_, v)| v).sum();
+    let s2xx: usize = status_counts
+        .iter()
+        .filter(|(k, _)| **k < 300)
+        .map(|(_, v)| v)
+        .sum();
+    let s3xx: usize = status_counts
+        .iter()
+        .filter(|(k, _)| (300..400).contains(*k))
+        .map(|(_, v)| v)
+        .sum();
+    let s4xx: usize = status_counts
+        .iter()
+        .filter(|(k, _)| (400..500).contains(*k))
+        .map(|(_, v)| v)
+        .sum();
+    let s5xx: usize = status_counts
+        .iter()
+        .filter(|(k, _)| **k >= 500)
+        .map(|(_, v)| v)
+        .sum();
 
     // top 10 paths
     let mut paths: Vec<_> = path_counts.iter().collect();
     paths.sort_unstable_by(|a, b| b.1.cmp(a.1));
-    let top_paths: Vec<String> = paths.iter().take(10)
+    let top_paths: Vec<String> = paths
+        .iter()
+        .take(10)
         .map(|(p, c)| format!("  {} ({})", p, c))
         .collect();
 
     // top 10 IPs
     let mut ips: Vec<_> = ip_counts.iter().collect();
     ips.sort_unstable_by(|a, b| b.1.cmp(a.1));
-    let top_ips: Vec<String> = ips.iter().take(10).map(|(ip, c)| {
-        let errs = ip_errors.get(*ip).copied().unwrap_or(0);
-        let rate = errs as f64 / **c as f64 * 100.0;
-        if errs > 0 {
-            format!("  {} ({} reqs, {} errors, {:.0}% error rate)", ip, c, errs, rate)
-        } else {
-            format!("  {} ({} reqs)", ip, c)
-        }
-    }).collect();
+    let top_ips: Vec<String> = ips
+        .iter()
+        .take(10)
+        .map(|(ip, c)| {
+            let errs = ip_errors.get(*ip).copied().unwrap_or(0);
+            let rate = errs as f64 / **c as f64 * 100.0;
+            if errs > 0 {
+                format!(
+                    "  {} ({} reqs, {} errors, {:.0}% error rate)",
+                    ip, c, errs, rate
+                )
+            } else {
+                format!("  {} ({} reqs)", ip, c)
+            }
+        })
+        .collect();
 
     // top error paths
     let mut epaths: Vec<_> = error_paths.iter().collect();
     epaths.sort_unstable_by(|a, b| b.1.cmp(a.1));
-    let top_error_paths: Vec<String> = epaths.iter().take(10)
+    let top_error_paths: Vec<String> = epaths
+        .iter()
+        .take(10)
         .map(|(p, c)| format!("  {} ({})", p, c))
         .collect();
 
     // hourly distribution (24 buckets, grouped as 4-hour blocks for brevity)
-    let hourly: Vec<String> = (0..6).map(|block| {
-        let sum: usize = hour_counts[block*4..(block*4+4)].iter().sum();
-        format!("  hours {:02}-{:02}: {} reqs", block*4, block*4+3, sum)
-    }).collect();
+    let hourly: Vec<String> = (0..6)
+        .map(|block| {
+            let sum: usize = hour_counts[block * 4..(block * 4 + 4)].iter().sum();
+            format!(
+                "  hours {:02}-{:02}: {} reqs",
+                block * 4,
+                block * 4 + 3,
+                sum
+            )
+        })
+        .collect();
 
     // top user agents (top 5)
     let mut uas: Vec<_> = ua_counts.iter().collect();
     uas.sort_unstable_by(|a, b| b.1.cmp(a.1));
-    let top_uas: Vec<String> = uas.iter().take(5)
+    let top_uas: Vec<String> = uas
+        .iter()
+        .take(5)
         .map(|(ua, c)| format!("  {} ... ({})", ua, c))
         .collect();
 
@@ -154,7 +196,11 @@ Top user agents:\n\
         hourly = hourly.join("\n"),
         top_paths = top_paths.join("\n"),
         top_ips = top_ips.join("\n"),
-        top_error_paths = if top_error_paths.is_empty() { "  (none)".into() } else { top_error_paths.join("\n") },
+        top_error_paths = if top_error_paths.is_empty() {
+            "  (none)".into()
+        } else {
+            top_error_paths.join("\n")
+        },
         top_uas = top_uas.join("\n"),
     );
 
@@ -191,14 +237,22 @@ struct OllamaRequestMessage {
 }
 
 #[get("/reports/ai-analysis")]
-pub async fn get_ai_analysis(req: HttpRequest, db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
+pub async fn get_ai_analysis(
+    req: HttpRequest,
+    db: web::Data<Database>,
+    query: web::Query<Query>,
+) -> HttpResponse {
     let username = match crate::session::get_username(&req, &db) {
         Some(u) => u,
-        None => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"})),
+        None => {
+            return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}));
+        }
     };
     let user = match crate::db::get_user(&db, &username) {
         Some(u) => u,
-        None => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"})),
+        None => {
+            return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}));
+        }
     };
     if !user.is_admin {
         return HttpResponse::Forbidden().json(serde_json::json!({"error": "Admin required"}));
@@ -208,8 +262,7 @@ pub async fn get_ai_analysis(req: HttpRequest, db: web::Data<Database>, query: w
     let prompt = match web::block(move || build_prompt(&db, since)).await {
         Ok(Ok(p)) => p,
         Ok(Err(msg)) => {
-            return HttpResponse::UnprocessableEntity()
-                .json(serde_json::json!({"error": msg}));
+            return HttpResponse::UnprocessableEntity().json(serde_json::json!({"error": msg}));
         }
         Err(e) => {
             log::error!("get_ai_analysis: build_prompt panicked: {e}");
@@ -224,7 +277,10 @@ pub async fn get_ai_analysis(req: HttpRequest, db: web::Data<Database>, query: w
     let client = reqwest::Client::new();
     let body = OllamaChatRequest {
         model,
-        messages: vec![OllamaRequestMessage { role: "user".into(), content: prompt }],
+        messages: vec![OllamaRequestMessage {
+            role: "user".into(),
+            content: prompt,
+        }],
         stream: true,
     };
 
@@ -272,7 +328,10 @@ pub async fn get_ai_analysis(req: HttpRequest, db: web::Data<Database>, query: w
             Ok(chunk) => {
                 if let Some(err) = chunk.error {
                     log::error!("get_ai_analysis: Ollama reported error: {err}");
-                    format!("data: {{\"error\":{}}}\n\n", serde_json::to_string(&err).unwrap_or_default())
+                    format!(
+                        "data: {{\"error\":{}}}\n\n",
+                        serde_json::to_string(&err).unwrap_or_default()
+                    )
                 } else if let Some(msg) = chunk.message {
                     if !msg.content.is_empty() {
                         let escaped = serde_json::to_string(&msg.content).unwrap_or_default();
@@ -296,7 +355,10 @@ pub async fn get_ai_analysis(req: HttpRequest, db: web::Data<Database>, query: w
         .insert_header(("Content-Type", "text/event-stream"))
         .insert_header(("Cache-Control", "no-cache"))
         .insert_header(("X-Accel-Buffering", "no"))
-        .streaming(stream::once(async {
-            Ok::<_, actix_web::Error>(web::Bytes::from("data: {\"started\":true}\n\n"))
-        }).chain(byte_stream))
+        .streaming(
+            stream::once(async {
+                Ok::<_, actix_web::Error>(web::Bytes::from("data: {\"started\":true}\n\n"))
+            })
+            .chain(byte_stream),
+        )
 }

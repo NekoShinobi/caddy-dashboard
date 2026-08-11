@@ -1,4 +1,4 @@
-use actix_web::{get, web, HttpResponse};
+use actix_web::{HttpResponse, get, web};
 use redb::Database;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -69,8 +69,12 @@ async fn get_geo(
             } else {
                 &e.request.client_ip
             };
-            let Ok(ip) = ip_str.parse::<std::net::IpAddr>() else { continue };
-            let Some((lat, lng)) = geoip.lookup_city(ip) else { continue };
+            let Ok(ip) = ip_str.parse::<std::net::IpAddr>() else {
+                continue;
+            };
+            let Some((lat, lng)) = geoip.lookup_city(ip) else {
+                continue;
+            };
             let key = ((lat * 100.0).round() as i64, (lng * 100.0).round() as i64);
             let entry = grid.entry(key).or_insert((0.0, HashMap::new()));
             entry.0 += 1.0;

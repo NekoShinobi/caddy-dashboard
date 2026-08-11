@@ -1,268 +1,271 @@
-# caddy-dashboard
+<div align="center">
 
-A self-hosted analytics dashboard for [Caddy](https://caddyserver.com/) access logs.
+# Caddy Dashboard
 
-**Stack:** Rust (actix-web) · SvelteKit · Tailwind CSS v4 · redb · Chart.js · Leaflet
+**See who is reaching your Caddy server, what they request, and how it responds.**
 
+A private, self-hosted analytics dashboard built directly on Caddy's JSON access logs.
 
-## Goals
+[![Rust](https://img.shields.io/badge/backend-Rust-CE412B?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Svelte](https://img.shields.io/badge/frontend-Svelte-FF3E00?style=flat-square&logo=svelte&logoColor=white)](https://svelte.dev/)
+[![Docker](https://img.shields.io/badge/deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Self-hosted](https://img.shields.io/badge/data-self--hosted-2E7D32?style=flat-square)](#how-it-works)
 
-I wanted to create a project where it was super easy to deploy and immediately get some decent visualizations into what kind of traffic you have.
+[Quick start](#quick-start) · [Using the dashboard](#using-the-dashboard) · [Configuration](#configuration) · [Development](#development)
 
-This is the recommended log settings that I use for my personal Caddy instance
+</div>
 
-- Excludes inter-traffic, because I want more visibility on external traffic, not internal.
-- Reasonable rollover defaults, but currently caddy-dashboard will only fetch incoming logs that it sees. It does not retroactively retrieve logs.
-- You can just get rid of roll over logs if you want to rely on caddy-dashboard to hold onto historical data.
-- Excludes Uptime Kuma to reduce some noise.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/overview-dark.png">
+  <img alt="Caddy Dashboard overview" src="screenshots/overview-light.png">
+</picture>
 
-```
-(log_settings) {
+## Why Caddy Dashboard?
+
+Caddy already produces rich structured access logs. Caddy Dashboard turns them into useful answers without sending traffic data to a third party or requiring a separate analytics stack.
+
+| Explore | Investigate | Understand | Control |
+| :--- | :--- | :--- | :--- |
+| Requests, hosts, paths, status codes, and latency | Search individual requests, inspect details, and export filtered CSV data | Follow trends, geographic origins, error rates, and large payloads | Keep data locally, set retention, manage users, and anonymize IPs in the UI |
+
+### Highlights
+
+- Live ingestion with automatic log-rotation detection
+- Searchable, paginated request logs with CSV export
+- Request, latency, payload, and unique-host time series
+- Interactive request-origin map with an embedded GeoIP database
+- Security reports for error-heavy clients and unusually large responses
+- Optional local traffic analysis through [Ollama](https://ollama.com/)
+- Local accounts, admin-managed users, and optional OIDC single sign-on
+- Six color themes, light/dark mode, and an IP anonymization toggle
+- A single Rust service with an embedded [redb](https://github.com/cberner/redb) database
+
+## Quick start
+
+### 1. Configure Caddy access logs
+
+Caddy Dashboard reads Caddy's JSON file logs. Add a `log` block to each site you want to observe:
+
+```caddyfile
+example.com {
     log {
-        output file /config/access.log {
+        output file /var/log/caddy/access.log {
             roll_size 30MB
             roll_keep 5
             roll_keep_for 720h
         }
-        level debug
-    }
-    @name {
-        client_ip 172.18.0.0/12
-        client_ip 192.168.0.0/12
     }
 
-    @uptime-kuma-agent {
-        header User-Agent Uptime-Kuma*
-    }
-
-    # Skip logging for specific IP ranges
-    log_skip @name
-    log_skip @uptime-kuma-agent
+    reverse_proxy app:3000
 }
 ```
 
+The log file must exist on the Docker host and be readable by the dashboard container. If Caddy also runs in Docker, share the same log volume between the two services.
 
-## Features
+> [!IMPORTANT]
+> On its first start, Caddy Dashboard begins at the end of the log file. Existing entries are not imported; new requests appear as Caddy writes them. After rotation or truncation, the replacement file is read from the beginning.
 
-- **Overview** — total requests, status code breakdown, top hosts/IPs/paths (host + path combined), slowest paths (avg + p99 duration)
-- **Logs** — paginated, filterable log table with configurable page size and direct page navigation
-  - Advanced filter syntax: `host:`, `path:`, `ip:`, `status:`, `method:`, `size:>N`, `size:<N` — prefix with `-` for negation (e.g. `-status:200`)
-  - Inline filter help (`?` button)
-  - Click any row to open a full detail modal with all request/response fields and Copy JSON
-  - CSV export (applies active filters)
-- **Graphs** — requests over time, response duration (avg/median/p99), payload size (avg/median/p99), unique hosts — bucketed by minute/hour/day — with human-readable axis units (ms/s/m, B/KB/MB)
-- **Map** — request origins plotted on an interactive world map using an embedded DB-IP Lite GeoIP database (auto-downloaded at build time). Falls back to Cloudflare's `Cf-Ipcountry` header for country-level placement. Individual points cluster when zoomed out.
-- **Reports** — security-focused analysis views:
-  - **High Error Rate by IP** — IPs with elevated 4xx/5xx rates, with per-endpoint breakdown and direct Logs link
-  - **Largest Response Payloads** — top 100 entries by response size
-  - **AI Traffic Analysis** — streams a 24-hour traffic summary to a local [Ollama](https://ollama.com/) instance for anomaly detection and action items (requires `OLLAMA_HOST` and `OLLAMA_MODEL`)
-- **Color themes** — 6 presets (Default, Nord, Dracula, Catppuccin, Sunset, Neon) applied to charts, persisted to localStorage
-- **Light/dark mode** — persisted to localStorage
-- **Real-time streaming** — SSE endpoint (`/api/logs/stream`) tails new log entries as they arrive
-- **Log rotation aware** — detects inode changes and file truncation, seamlessly resumes from new file
-- **Tail-only ingestion** — on first start, skips existing log content and ingests only new entries going forward
-- **Data retention** — optional automatic purge of entries older than N days (`RETENTION_DAYS`)
-- **Anonymize mode** — toggle to blur IP addresses across the UI
-
-## Screenshots
-
-![Overview](screenshots/overview.png)
-![Graphs](screenshots/graphs.png)
-![Logs](screenshots/logs.png)
-![Map](screenshots/map.png)
-
-## Architecture
-
-```
-access.log ──► Ingestion task (250ms poll) ──► redb raw logs + indexes
-                                           ├──► minute/hour/day rollups
-                                           └──► broadcast channel ──► SSE clients
-Overview/graphs ──► cached rollup merges
-Log browsing ──► reverse cursor scan (status/method indexes when applicable)
-```
-
-Log entries are parsed once on ingest and stored in an embedded [redb](https://github.com/cberner/redb) database. The source log file is treated as transient; the database is the persistent store.
-
-Existing databases are indexed and backfilled with analytics rollups once on the first startup after upgrading. New writes update the raw log, indexes, and live minute rollup atomically; completed hour and day rollups are compacted at bucket boundaries.
-
-On first start the ingestion task records the current end-of-file position and tails only new entries from that point forward. After a log rotation (inode change or truncation) the new file is read from the beginning.
-
-The DB-IP Lite City MMDB is downloaded automatically during `cargo build` and embedded into the binary via `include_bytes!`. Set `SKIP_DBIP_DOWNLOAD=1` to skip the download (e.g. in CI).
-
-## Getting Started
-
-### Local development
-
-```bash
-# Backend (defaults: LOG_PATH=access.log, DATA_DIR=./data, PORT=9080)
-LOG_PATH=access.log cargo run
-
-# Frontend (proxies /api → :9080)
-cd ui
-bun install
-bun run dev
-```
-
-### Docker
+### 2. Start the dashboard
 
 ```bash
 cp compose.example.yml compose.yml
-# Edit compose.yml — set the access.log volume source
-docker compose up -d
 ```
 
-### Test data
+Open `compose.yml` and replace the source side of the log mount with the real path from your Caddy configuration:
 
-`inject-logs.py` streams sample entries from `access-gen.log` into `access.log`:
+```yaml
+volumes:
+  - /var/log/caddy/access.log:/config/access.log:ro
+  - caddy-dashboard-data:/data
+```
+
+Then build and start the service:
 
 ```bash
-python3 inject-logs.py                       # append one entry
-python3 inject-logs.py --loop                # one entry per second (default)
-python3 inject-logs.py --loop --interval 200 # one entry every 200ms
+docker compose up --build -d
 ```
 
-Each entry's timestamp is set to the current time.
+Open [http://localhost:9080](http://localhost:9080) and create the first admin account. Registration closes automatically after that account is created; admins can add more users from **Settings → User Management**.
 
-## Authentication
+> [!NOTE]
+> Sessions use secure cookies by default. If you access the dashboard directly over local plain HTTP, set `COOKIE_SECURE=false` in `compose.yml`. Keep the default `true` when serving it over HTTPS.
 
-On first start, navigate to the dashboard and create the initial admin account. Subsequent registrations are disabled — additional users are managed through the admin panel (Settings → User Management).
+### 3. Generate a request
 
-To reset the user database (e.g., locked out): set `USER_DATABASE_RESET=true` in the environment, restart the container, then remove the variable and create a new admin account. All sessions are also invalidated.
+Visit a site handled by Caddy, then refresh the dashboard. The new request should appear in **Overview** and **Access logs** within a moment.
 
-### OIDC / SSO
+If it does not, check that:
 
-Set `OIDC_CLIENT_ID` to enable SSO login alongside (or instead of) local accounts.
+- Caddy is writing JSON entries to the mounted file.
+- The host path in `compose.yml` points to that exact file.
+- The file is readable inside the container at `/config/access.log`.
+- The request happened after the dashboard's first startup.
 
-**Provider setup:** register the following redirect URI with your identity provider:
+## Using the dashboard
+
+<table>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="screenshots/logs-dark.png">
+        <img src="screenshots/logs-light.png" alt="Filterable request log">
+      </picture>
+      <br><sub><strong>Access logs</strong> — search, inspect, and export individual requests.</sub>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="screenshots/graphs-dark.png">
+        <img src="screenshots/graphs-light.png" alt="Traffic and latency trends">
+      </picture>
+      <br><sub><strong>Performance</strong> — compare traffic, latency, payload size, and unique hosts over time.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="screenshots/map-dark.png">
+        <img src="screenshots/map-light.png" alt="Geographic request map">
+      </picture>
+      <br><sub><strong>Request map</strong> — explore request origins by country or precise cluster.</sub>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="screenshots/overview-dark.png">
+        <img src="screenshots/overview-light.png" alt="Traffic overview">
+      </picture>
+      <br><sub><strong>Overview</strong> — spot top hosts, paths, clients, status codes, and slow endpoints.</sub>
+    </td>
+  </tr>
+</table>
+
+### Find a request
+
+Use the search field on **Access logs** to combine filters. Prefix a filter with `-` to exclude matching entries.
+
+```text
+status:4xx -path:/health* method:POST
 ```
-{BASE_URL}/api/auth/oidc/callback
-```
 
-**Scopes:** the default `openid email profile` is sufficient for most providers. An email address is required — logins without one are rejected. If `email_verified` is present and `false` the login is also rejected.
+| Filter | Example | Matches |
+| :--- | :--- | :--- |
+| `host:` | `host:example.com` | Hostname; `*` wildcards are supported |
+| `path:` | `path:/api/*` | Request path |
+| `ip:` | `ip:203.0.113.10` | Client IP address |
+| `status:` | `status:404` or `status:4xx` | Exact code or status family |
+| `method:` | `method:POST` | HTTP method |
+| `size:>` / `size:<` | `size:>1048576` | Response size in bytes |
 
-**User matching:** OIDC users are matched to existing accounts by email (case-insensitive). A new account is created on first login if no match exists. The username is derived from `preferred_username`, the local part of the email, or the OIDC `sub` claim.
+Select a row to see every captured request and response field or copy the original JSON. **Export CSV** applies the filters currently shown in the search field.
 
-**Admin rights:**
-- If `OIDC_ADMIN_CLAIM` + `OIDC_ADMIN_VALUE` are set, admin status is synced from the claim on every login.
-- If neither is set, the first OIDC user to log in gets admin rights; subsequent users are non-admin by default.
+### Read trends and reports
 
-**Logout:** if the provider exposes an `end_session_endpoint` in its discovery document, logging out from the dashboard also triggers RP-initiated logout at the provider (with `id_token_hint`).
+- **Performance** groups data by minute, hour, or day and charts request volume, duration, response size, and unique hosts.
+- **Request map** resolves request IPs with the embedded DB-IP Lite City database. When available, Caddy Dashboard can also fall back to Cloudflare's `Cf-Ipcountry` header.
+- **Reports** identifies IPs with high 4xx/5xx rates and the largest response payloads.
+- **AI Traffic Analysis** sends a summary of the last 24 hours to your configured Ollama server and streams its findings back to the report. No external AI provider is required.
 
-**OIDC-only mode:** set `OIDC_DISABLE_LOGIN=true` to hide the local login form and block the login/signup API endpoints entirely.
+### Manage privacy and access
+
+- Toggle **Anonymize IPs** to blur client addresses throughout the interface.
+- Choose a theme or light/dark mode from the appearance controls; preferences stay in the browser.
+- Admins can create, update, and remove users from **Settings → User Management**.
+- Set `RETENTION_DAYS` to automatically delete old request records.
 
 ## Configuration
 
-All configuration via environment variables:
+All settings are environment variables. The example Compose file includes ready-to-edit entries for the common options.
 
-### Core
+### Core settings
 
-| Variable              | Default                  | Description                                                       |
-|-----------------------|--------------------------|-------------------------------------------------------------------|
-| `LOG_PATH`            | `/config/access.log`     | Path to Caddy access log file                                     |
-| `DATA_DIR`            | `./data`                 | Directory for the redb database                                   |
-| `PORT`                | `9080`                   | HTTP port                                                         |
-| `GEOIP_DB`            | *(embedded DB-IP Lite)*  | Path to an external MaxMind-compatible `.mmdb` file               |
-| `RETENTION_DAYS`      | `0` (disabled)           | Purge entries older than N days (0 = keep forever)                |
-| `OLLAMA_HOST`         | `http://localhost:11434` | Ollama API base URL for AI analysis                               |
-| `OLLAMA_MODEL`        | `llama3.2`               | Ollama model name (must be pulled)                                |
-| `COOKIE_SECURE`       | `true`                   | Set `false` only for local dev over plain HTTP                    |
-| `BASE_URL`            | *(derived from request)* | Public base URL, e.g. `https://dash.example.com` — required for OIDC behind a reverse proxy |
-| `USER_DATABASE_RESET` | `false`                  | Set `true` to wipe all users and sessions on next startup         |
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `PORT` | `9080` | Dashboard HTTP port |
+| `LOG_PATH` | `/config/access.log` | Caddy JSON access-log path |
+| `DATA_DIR` | `./data` | Directory containing the persistent redb database |
+| `RETENTION_DAYS` | `0` | Delete records older than this many days; `0` keeps them indefinitely |
+| `COOKIE_SECURE` | `true` | Require HTTPS when sending session cookies |
+| `BASE_URL` | derived from request | Public URL, such as `https://dash.example.com`; set this behind a reverse proxy when using OIDC |
+| `GEOIP_DB` | embedded database | Optional path to a MaxMind-compatible `.mmdb` database |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API base URL |
+| `OLLAMA_MODEL` | `llama3.2` | Installed Ollama model used for traffic analysis |
 
-In Docker, `LOG_PATH` defaults to `/config/access.log` and `DATA_DIR` defaults to `/data`.
+The `/data` volume is the durable source of historical analytics. The Caddy log file is treated as an incoming stream and can continue using normal rotation.
 
-### OIDC
+<details>
+<summary><strong>OIDC / SSO settings</strong></summary>
 
-| Variable               | Default                   | Description                                                                   |
-|------------------------|---------------------------|-------------------------------------------------------------------------------|
-| `OIDC_CLIENT_ID`       | *(unset)*                 | Client ID — setting this enables OIDC                                         |
-| `OIDC_CLIENT_SECRET`   | *(unset)*                 | Client secret                                                                 |
-| `OIDC_ISSUER_URL`      | *(unset)*                 | Issuer base URL (discovery doc fetched from `{issuer}/.well-known/openid-configuration`) |
-| `OIDC_SCOPES`          | `openid email profile`    | Space-separated scopes to request                                             |
-| `OIDC_ADMIN_CLAIM`     | *(unset)*                 | Claim name to check for admin rights (e.g. `groups`, `roles`)                 |
-| `OIDC_ADMIN_VALUE`     | *(unset)*                 | Value within `OIDC_ADMIN_CLAIM` that grants admin (e.g. `admins`)             |
-| `OIDC_PROVIDERS_NAME`  | `SSO`                     | Label shown on the login button                                               |
-| `OIDC_PROVIDER_LOGO_URL` | *(unset)*               | Optional logo URL shown on the login button                                   |
-| `OIDC_DISABLE_LOGIN`   | `false`                   | Hide local login form and block login/signup endpoints                        |
+Set `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_ISSUER_URL` to enable the SSO button. Register this callback with the provider:
 
-## API
-
-| Method | Path                           | Description                                                                 |
-|--------|--------------------------------|-----------------------------------------------------------------------------|
-| GET    | `/api/stats`                   | Aggregated stats (status codes, top lists, slowest paths)                   |
-| GET    | `/api/logs`                    | Cursor-paginated + filtered log entries                                     |
-| GET    | `/api/logs/export`             | CSV export of filtered log entries                                          |
-| GET    | `/api/logs/stream`             | SSE stream of new log entries in real time                                  |
-| GET    | `/api/timeline`                | Time-bucketed stats (`bucket=minute\|hour\|day`)                            |
-| GET    | `/api/geo`                     | Request counts and coordinates for map rendering                            |
-| GET    | `/api/reports/error-rates`     | IPs with high 4xx/5xx error rates and per-endpoint breakdown                |
-| GET    | `/api/reports/large-payloads`  | Top 100 entries by response body size                                       |
-| GET    | `/api/reports/ai-analysis`     | SSE stream of Ollama AI analysis of the last 24 hours of traffic            |
-
-### Log filter parameters (`/api/logs`, `/api/logs/export`)
-
-| Param        | Example          | Description                    |
-|--------------|------------------|--------------------------------|
-| `host`       | `example.com`    | Exact or glob match (`*`)      |
-| `path`       | `/api/*`         | Exact or glob match            |
-| `ip`         | `1.2.3.4`        | Client IP                      |
-| `status`     | `4xx` or `200`   | Status code or range           |
-| `method`     | `POST`           | HTTP method                    |
-| `size_gt`    | `1048576`        | Response size > N bytes        |
-| `size_lt`    | `1048576`        | Response size < N bytes        |
-| `not_host`   | `example.com`    | Exclude host                   |
-| `not_path`   | `/health`        | Exclude path                   |
-| `not_ip`     | `1.2.3.4`        | Exclude IP                     |
-| `not_status` | `200`            | Exclude status                 |
-| `not_method` | `GET`            | Exclude method                 |
-| `limit`      | `50`             | Rows to return (1-500)         |
-| `cursor`     | `"18420"`        | Exclusive cursor from `next_cursor` |
-
-`/api/logs` returns `next_cursor` and `has_more`. Exact totals are included for unfiltered browsing; filtered requests omit totals so results can stop scanning as soon as a page is full.
-
-## Project Structure
-
+```text
+{BASE_URL}/api/auth/oidc/callback
 ```
-caddy-dashboard/
-├── build.rs               Downloads and embeds DB-IP Lite GeoIP MMDB at compile time
-├── src/
-│   ├── main.rs            Entry point
-│   ├── analytics.rs       Mergeable histograms and analytics rollup types
-│   ├── env.rs             Environment variable config
-│   ├── db.rs              redb setup, indexed log queries, rollups, users, and sessions
-│   ├── auth.rs            Password hashing (Argon2id)
-│   ├── session.rs         Session token generation and cookie helpers
-│   ├── oidc.rs            OIDC discovery, token exchange, userinfo, admin claim check
-│   ├── login_throttle.rs  Progressive delay on repeated login failures
-│   ├── geoip.rs           GeoIP lookup (embedded DB-IP Lite or external file)
-│   ├── ingest.rs          Background log ingestion task
-│   ├── log_parser.rs      Caddy JSON log structs
-│   └── web/
-│       ├── mod.rs         actix-web server + SPA fallback
-│       ├── middleware.rs  RequireAuth middleware
-│       └── services/      API route handlers
-│           ├── auth.rs    Login, logout, signup, password change
-│           ├── oidc.rs    OIDC login initiation and callback
-│           ├── admin.rs   User management (admin only)
-│           ├── settings.rs Site settings (AI prompt)
-│           ├── logs.rs    Log query, filtering, CSV export
-│           ├── reports.rs Error rate and large payload reports
-│           └── ai.rs      Ollama AI analysis (SSE streaming)
-├── ui/                    SvelteKit frontend
-│   └── src/
-│       ├── lib/
-│       │   ├── auth.svelte.ts       Auth state, OIDC config, login/logout helpers
-│       │   ├── crypto.ts            Client-side SHA-256 password hashing
-│       │   └── components/
-│       │       └── AuthGate.svelte  Login/SSO gate wrapping authenticated routes
-│       └── routes/
-│           ├── +page.svelte   Overview dashboard
-│           ├── logs/          Log table with filters, modal, CSV export
-│           ├── graphs/        Time-series charts
-│           ├── map/           Geographic origin map (cluster mode)
-│           ├── reports/       Reports + AI analysis
-│           └── settings/      Account, user management, site settings
-├── inject-logs.py         Test data utility
-├── Dockerfile
-└── compose.example.yml
+
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `OIDC_CLIENT_ID` | unset | Enables OIDC when set |
+| `OIDC_CLIENT_SECRET` | unset | Provider client secret |
+| `OIDC_ISSUER_URL` | unset | Provider issuer URL used for discovery |
+| `OIDC_SCOPES` | `openid email profile` | Space-separated scopes; an email address is required |
+| `OIDC_PROVIDERS_NAME` | `SSO` | Text displayed on the sign-in button |
+| `OIDC_PROVIDER_LOGO_URL` | unset | Optional sign-in button logo |
+| `OIDC_ADMIN_CLAIM` | unset | Claim inspected for administrator access, such as `groups` |
+| `OIDC_ADMIN_VALUE` | unset | Claim value that grants administrator access |
+| `OIDC_DISABLE_LOGIN` | `false` | Hide and disable local username/password login |
+| `OIDC_REQUIRE_EMAIL_VERIFIED` | `true` | Reject accounts explicitly reported as having an unverified email |
+
+OIDC accounts are matched to local accounts by email, case-insensitively. If admin claim mapping is not configured, the first OIDC user becomes an admin and later users start as non-admins. When claim mapping is configured, admin access is synchronized on every login.
+
+</details>
+
+<details>
+<summary><strong>Recover administrator access</strong></summary>
+
+Set `USER_DATABASE_RESET=true`, restart the service once, and then remove the variable immediately. This deletes all users, sessions, and stored OIDC tokens so a new initial admin can be created. Traffic analytics are not deleted.
+
+</details>
+
+## How it works
+
+```text
+Caddy JSON log
+      │
+      ▼
+tail + parse ──► persistent redb storage ──► overview / logs / reports
+      │                     │
+      └──► live SSE stream  └──► minute / hour / day rollups ──► graphs
 ```
+
+Each entry is parsed once. New writes update the raw record, search indexes, and analytics rollups together. The UI and API are served by the same Rust process, so production deployment needs only one application container and one persistent data volume.
+
+GeoIP data is downloaded during the build and embedded in the binary. Set `SKIP_DBIP_DOWNLOAD=1` when building in an environment that must skip that download; the map can instead use an external database through `GEOIP_DB`.
+
+## Development
+
+The backend uses Rust nightly; the frontend uses Bun and SvelteKit. Install [Just](https://github.com/casey/just) and [Bacon](https://dystroy.org/bacon/) for the provided development workflow.
+
+```bash
+# Fetch locked Rust and frontend dependencies
+just setup
+
+# Run both development servers with live reload
+just dev
+```
+
+The frontend is available through Vite and proxies `/api` requests to the backend on port `9080`. To append current-timestamp sample traffic while developing:
+
+```bash
+just inject-logs             # continuous stream, one request per second
+just inject-logs 200         # one request every 200 ms
+```
+
+Before opening a change, run the full local check suite:
+
+```bash
+just ci
+```
+
+<div align="center">
+
+Built for operators who want useful Caddy traffic insight without giving up ownership of their data.
+
+</div>

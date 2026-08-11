@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { auth } from '$lib/auth.svelte';
+	import { MIN_PASSWORD_LENGTH } from '$lib/crypto';
 
 	let { children } = $props();
 
@@ -21,7 +22,7 @@
 		no_email: 'Your identity provider account does not have an email address.',
 		email_not_verified: 'Your identity provider account email is not verified.',
 		create_user_failed: 'Failed to create your account. Contact your administrator.',
-		session_failed: 'Failed to create a session after login.',
+		session_failed: 'Failed to create a session after login.'
 	};
 
 	onMount(() => {
@@ -69,7 +70,9 @@
 
 {#if auth.loading}
 	<div class="flex h-screen items-center justify-center">
-		<div class="h-6 w-6 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600 dark:border-white/20 dark:border-t-white/60"></div>
+		<div
+			class="h-6 w-6 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-600 dark:border-white/20 dark:border-t-white/60"
+		></div>
 	</div>
 {:else if auth.user}
 	{@render children()}
@@ -89,15 +92,23 @@
 				</p>
 			</div>
 
-			<div class="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-neutral-900">
+			<div
+				class="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-neutral-900"
+			>
 				{#if auth.needsSetup && showLocal}
-					<div class="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-400">
+					<div
+						class="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-400"
+					>
 						No users exist yet. The first account created will be the admin.
 					</div>
 				{/if}
 
 				{#if error}
-					<p class="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">{error}</p>
+					<p
+						class="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400"
+					>
+						{error}
+					</p>
 				{/if}
 
 				<!-- OIDC login button -->
@@ -109,8 +120,17 @@
 						{#if oidc?.logo_url}
 							<img src={oidc.logo_url} alt="" class="h-5 w-5 shrink-0 object-contain" />
 						{:else}
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								class="h-4 w-4 shrink-0"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
 							</svg>
 						{/if}
 						Sign in with {oidc?.provider_name ?? 'SSO'}
@@ -127,7 +147,11 @@
 
 				<!-- Local login / signup form -->
 				{#if showLocal}
-					<form onsubmit={auth.needsSetup ? handleSignup : handleLogin} class="space-y-4" autocomplete="on">
+					<form
+						onsubmit={auth.needsSetup ? handleSignup : handleLogin}
+						class="space-y-4"
+						autocomplete="on"
+					>
 						<div>
 							<label class="mb-1.5 block text-sm font-medium" for="auth-username">Username</label>
 							<input
@@ -142,7 +166,9 @@
 
 						{#if auth.needsSetup}
 							<div>
-								<label class="mb-1.5 block text-sm font-medium" for="auth-email">Email address</label>
+								<label class="mb-1.5 block text-sm font-medium" for="auth-email"
+									>Email address</label
+								>
 								<input
 									id="auth-email"
 									type="email"
@@ -161,11 +187,14 @@
 								type="password"
 								bind:value={password}
 								required
+								minlength={auth.needsSetup ? MIN_PASSWORD_LENGTH : undefined}
 								autocomplete={auth.needsSetup ? 'new-password' : 'current-password'}
 								class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:ring-white/30"
 							/>
 							{#if auth.needsSetup}
-								<p class="mt-1 text-xs text-neutral-400 dark:text-white/30">Minimum 8 characters</p>
+								<p class="mt-1 text-xs text-neutral-400 dark:text-white/30">
+									Minimum {MIN_PASSWORD_LENGTH} characters
+								</p>
 							{/if}
 						</div>
 
@@ -177,8 +206,15 @@
 							{#if submitting}
 								<span class="flex items-center justify-center gap-2">
 									<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+										<circle
+											class="opacity-25"
+											cx="12"
+											cy="12"
+											r="10"
+											stroke="currentColor"
+											stroke-width="4"
+										/>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
 									</svg>
 									{auth.needsSetup ? 'Creating account…' : 'Signing in…'}
 								</span>

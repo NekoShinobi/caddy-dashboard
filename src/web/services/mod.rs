@@ -12,8 +12,7 @@ mod stats;
 mod timeline;
 
 async fn api_not_found() -> actix_web::HttpResponse {
-    actix_web::HttpResponse::NotFound()
-        .json(serde_json::json!({"error": "not found"}))
+    actix_web::HttpResponse::NotFound().json(serde_json::json!({"error": "not found"}))
 }
 
 pub fn configure(cfg: &mut web::ServiceConfig) {

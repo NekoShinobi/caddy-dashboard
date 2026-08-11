@@ -1,11 +1,12 @@
 use actix_web::{
+    Error, HttpResponse,
     body::EitherBody,
     dev::{self, Service, ServiceRequest, ServiceResponse, Transform},
-    web, Error, HttpResponse,
+    web,
 };
 use redb::Database;
 use std::{
-    future::{ready, Future, Ready},
+    future::{Future, Ready, ready},
     pin::Pin,
 };
 
@@ -70,8 +71,8 @@ where
         if !authenticated {
             let (req, _) = req.into_parts();
             return Box::pin(async move {
-                let res = HttpResponse::Unauthorized()
-                    .json(serde_json::json!({"error": "unauthorized"}));
+                let res =
+                    HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}));
                 Ok(ServiceResponse::new(req, res).map_into_right_body())
             });
         }

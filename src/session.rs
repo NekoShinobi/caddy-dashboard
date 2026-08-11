@@ -1,8 +1,8 @@
 use actix_web::{
-    cookie::{time::Duration, Cookie, SameSite},
     HttpRequest,
+    cookie::{Cookie, SameSite, time::Duration},
 };
-use rand::{rngs::OsRng, RngCore};
+use rand::{RngCore, rngs::OsRng};
 
 pub const COOKIE_NAME: &str = "cd_session";
 

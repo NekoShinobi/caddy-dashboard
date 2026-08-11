@@ -1,13 +1,31 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Tabs, ToggleGroup } from 'bits-ui';
+	import SegmentedControl from '$lib/components/SegmentedControl.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { auth } from '$lib/auth.svelte';
 	import { theme } from '$lib/theme.svelte';
 	import { colorTheme } from '$lib/color-theme.svelte';
 	import { THEMES } from '$lib/themes';
-	import { hashPassword } from '$lib/crypto';
+	import { MIN_PASSWORD_LENGTH, hashPassword, validatePassword } from '$lib/crypto';
 
 	type Tab = 'account' | 'users' | 'site';
 	let tab = $state<Tab>('account');
+	const modeOptions = [
+		{ label: 'Light', value: 'light' },
+		{ label: 'Dark', value: 'dark' }
+	];
+
+	function changeTab(value: string) {
+		tab = value as Tab;
+		if (tab === 'users' && auth.user?.is_admin) void fetchUsers();
+		if (tab === 'site' && auth.user?.is_admin) void fetchPrompt();
+	}
+
+	function changeMode(value: string) {
+		const shouldBeDark = value === 'dark';
+		if (theme.dark !== shouldBeDark) theme.toggle();
+	}
 
 	// ── Account (change password) ────────────────────────────────────────────
 	let currentPw = $state('');
@@ -21,11 +39,16 @@
 		e.preventDefault();
 		pwError = '';
 		pwSuccess = '';
-		if (newPw !== confirmPw) { pwError = 'Passwords do not match'; return; }
+		if (newPw !== confirmPw) {
+			pwError = 'Passwords do not match';
+			return;
+		}
 		pwSubmitting = true;
 		const err = await auth.changePassword(currentPw, newPw);
 		pwSubmitting = false;
-		if (err) { pwError = err; } else {
+		if (err) {
+			pwError = err;
+		} else {
 			pwSuccess = 'Password updated successfully';
 			currentPw = newPw = confirmPw = '';
 		}
@@ -38,7 +61,13 @@
 	}
 
 	// ── User management (admin) ───────────────────────────────────────────────
-	interface UserRow { username: string; email: string; is_admin: boolean; created_at: number; is_oidc?: boolean; }
+	interface UserRow {
+		username: string;
+		email: string;
+		is_admin: boolean;
+		created_at: number;
+		is_oidc?: boolean;
+	}
 	let users = $state<UserRow[]>([]);
 	let usersLoading = $state(false);
 	let usersError = $state('');
@@ -58,6 +87,7 @@
 	let editIsAdmin = $state(false);
 	let editError = $state('');
 	let editSubmitting = $state(false);
+	let deleteTarget = $state<string | null>(null);
 
 	let adminCount = $derived(users.filter((u) => u.is_admin).length);
 
@@ -80,16 +110,36 @@
 		e.preventDefault();
 		createError = '';
 		createSuccess = '';
+		const invalid = validatePassword(newPassword);
+		if (invalid) {
+			createError = invalid;
+			return;
+		}
 		createSubmitting = true;
 		try {
 			const res = await fetch('/api/admin/users', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ username: newUsername, email: newEmail, password: await hashPassword(newPassword), is_admin: newIsAdmin })
+				body: JSON.stringify({
+					username: newUsername,
+					email: newEmail,
+					password: await hashPassword(newPassword),
+					is_admin: newIsAdmin
+				})
 			});
 			const data = await res.json();
-			if (!res.ok) { createError = data.error ?? 'Failed'; }
-			else { createSuccess = `User "${newUsername}" created`; newUsername = ''; newEmail = ''; newPassword = ''; newIsAdmin = false; await fetchUsers(); }
+			if (!res.ok) {
+				createError = data.error ?? 'Failed';
+			} else {
+				createSuccess = `User "${newUsername}" created`;
+				newUsername = '';
+				newEmail = '';
+				newPassword = '';
+				newIsAdmin = false;
+				await fetchUsers();
+			}
+		} catch (e) {
+			createError = e instanceof Error ? e.message : 'Failed to create user';
 		} finally {
 			createSubmitting = false;
 		}
@@ -114,21 +164,30 @@
 				body: JSON.stringify({ username: editUsername, email: editEmail, is_admin: editIsAdmin })
 			});
 			const data = await res.json();
-			if (!res.ok) { editError = data.error ?? 'Failed to update'; }
-			else { editTarget = null; await fetchUsers(); }
+			if (!res.ok) {
+				editError = data.error ?? 'Failed to update';
+			} else {
+				editTarget = null;
+				await fetchUsers();
+			}
+		} catch (e) {
+			editError = e instanceof Error ? e.message : 'Failed to update user';
 		} finally {
 			editSubmitting = false;
 		}
 	}
 
 	async function handleDeleteUser(username: string) {
-		if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
-		const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
-		if (!res.ok) {
-			const data = await res.json().catch(() => ({}));
-			usersError = data.error ?? 'Failed to delete';
-		} else {
+		usersError = '';
+		try {
+			const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}`, {
+				method: 'DELETE'
+			});
+			const data = (await res.json().catch(() => ({}))) as { error?: string };
+			if (!res.ok) throw new Error(data.error ?? 'Failed to delete');
 			await fetchUsers();
+		} catch (e) {
+			usersError = e instanceof Error ? e.message : 'Failed to delete user';
 		}
 	}
 
@@ -140,6 +199,11 @@
 
 	async function handleResetPassword(username: string) {
 		resetError = '';
+		const invalid = validatePassword(resetPw);
+		if (invalid) {
+			resetError = invalid;
+			return;
+		}
 		resetSubmitting = true;
 		try {
 			const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/password`, {
@@ -148,17 +212,18 @@
 				body: JSON.stringify({ new_password: await hashPassword(resetPw) })
 			});
 			const data = await res.json();
-			if (!res.ok) { resetError = data.error ?? 'Failed'; }
-			else { resetTarget = null; resetPw = ''; }
+			if (!res.ok) {
+				resetError = data.error ?? 'Failed';
+			} else {
+				resetTarget = null;
+				resetPw = '';
+			}
+		} catch (e) {
+			resetError = e instanceof Error ? e.message : 'Failed to reset password';
 		} finally {
 			resetSubmitting = false;
 		}
 	}
-
-	$effect(() => {
-		if (tab === 'users' && auth.user?.is_admin) fetchUsers();
-		if (tab === 'site' && auth.user?.is_admin) fetchPrompt();
-	});
 
 	onMount(() => {
 		if (auth.user?.is_admin) fetchUsers();
@@ -200,8 +265,11 @@
 				body: JSON.stringify({ template: promptTemplate })
 			});
 			const data = await res.json().catch(() => ({}));
-			if (!res.ok) { promptError = (data as { error?: string }).error ?? 'Failed to save'; }
-			else { promptSuccess = 'Prompt saved.'; }
+			if (!res.ok) {
+				promptError = (data as { error?: string }).error ?? 'Failed to save';
+			} else {
+				promptSuccess = 'Prompt saved.';
+			}
 		} catch (e) {
 			promptError = e instanceof Error ? e.message : 'Failed to save';
 		} finally {
@@ -216,187 +284,251 @@
 	}
 </script>
 
-<div class="mx-auto max-w-3xl space-y-6">
-	<h1 class="text-3xl font-bold">Settings</h1>
+<div class="page-shell max-w-4xl" data-od-id="settings-page">
+	<header class="page-header" data-od-id="settings-header">
+		<div>
+			<p class="page-eyebrow">Workspace</p>
+			<h1 class="page-title">Settings</h1>
+			<p class="page-description">
+				Manage your profile, appearance, access, and traffic-analysis configuration.
+			</p>
+		</div>
+	</header>
 
 	<!-- Tabs -->
-	<div class="flex gap-1 border-b border-neutral-200 dark:border-white/10">
-		<button
-			onclick={() => tab = 'account'}
-			class="rounded-t-lg px-4 py-2 text-sm font-medium transition-colors {tab === 'account'
-				? 'border-b-2 border-neutral-900 dark:border-white'
-				: 'text-neutral-500 hover:text-neutral-700 dark:text-white/50 dark:hover:text-white/80'}"
-		>My Account</button>
-		{#if auth.user?.is_admin}
-			<button
-				onclick={() => tab = 'users'}
-				class="rounded-t-lg px-4 py-2 text-sm font-medium transition-colors {tab === 'users'
-					? 'border-b-2 border-neutral-900 dark:border-white'
-					: 'text-neutral-500 hover:text-neutral-700 dark:text-white/50 dark:hover:text-white/80'}"
-			>User Management</button>
-			<button
-				onclick={() => tab = 'site'}
-				class="rounded-t-lg px-4 py-2 text-sm font-medium transition-colors {tab === 'site'
-					? 'border-b-2 border-neutral-900 dark:border-white'
-					: 'text-neutral-500 hover:text-neutral-700 dark:text-white/50 dark:hover:text-white/80'}"
-			>Site</button>
-		{/if}
-	</div>
+	<Tabs.Root value={tab} onValueChange={changeTab}>
+		<Tabs.List class="segmented-control settings-tabs" aria-label="Settings sections">
+			<Tabs.Trigger value="account" class="segmented-item">My account</Tabs.Trigger>
+			{#if auth.user?.is_admin}
+				<Tabs.Trigger value="users" class="segmented-item">User management</Tabs.Trigger>
+				<Tabs.Trigger value="site" class="segmented-item">Site</Tabs.Trigger>
+			{/if}
+		</Tabs.List>
+	</Tabs.Root>
 
 	<!-- Account Tab -->
 	{#if tab === 'account'}
 		<div class="space-y-4">
-			<div class="rounded-lg border border-neutral-200 bg-neutral-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+			<div
+				class="rounded-lg border border-neutral-200 bg-neutral-50 p-4 dark:border-white/10 dark:bg-white/[0.03]"
+			>
 				<div class="text-xs text-neutral-500 dark:text-white/40">Signed in as</div>
 				<div class="mt-0.5 font-medium">{auth.user?.username}</div>
 				{#if auth.user?.email}
 					<div class="text-sm text-neutral-500 dark:text-white/40">{auth.user.email}</div>
 				{/if}
 				{#if auth.user?.is_admin}
-					<span class="mt-1 inline-block rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">Admin</span>
+					<span
+						class="mt-1 inline-block rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-400"
+						>Admin</span
+					>
 				{/if}
 			</div>
 
 			<!-- Theme Preferences -->
-			<div class="rounded-xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900">
+			<div
+				class="rounded-xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900"
+			>
 				<h2 class="mb-4 font-semibold">Appearance</h2>
 				<div class="space-y-4">
 					<!-- Light/Dark -->
-					<div>
-						<div class="mb-2 text-sm font-medium">Mode</div>
-						<div class="flex gap-2">
-							<button
-								onclick={() => { if (theme.dark) theme.toggle(); }}
-								class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors {!theme.dark
-									? 'border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900'
-									: 'border-neutral-200 text-neutral-600 hover:bg-neutral-50 dark:border-white/10 dark:text-white/60 dark:hover:bg-white/5'}"
-							>
-								<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
-								</svg>
-								Light
-							</button>
-							<button
-								onclick={() => { if (!theme.dark) theme.toggle(); }}
-								class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors {theme.dark
-									? 'border-neutral-900 bg-neutral-900 text-white dark:border-white dark:bg-white dark:text-neutral-900'
-									: 'border-neutral-200 text-neutral-600 hover:bg-neutral-50 dark:border-white/10 dark:text-white/60 dark:hover:bg-white/5'}"
-							>
-								<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-								</svg>
-								Dark
-							</button>
+					<div class="setting-row">
+						<div>
+							<div class="text-sm font-medium">Mode</div>
+							<p class="text-xs text-[var(--app-muted-fg)]">
+								Choose the contrast best suited to your environment.
+							</p>
 						</div>
+						<SegmentedControl
+							value={theme.dark ? 'dark' : 'light'}
+							options={modeOptions}
+							onchange={changeMode}
+							label="Color mode"
+						/>
 					</div>
 					<!-- Color Theme -->
 					<div>
 						<div class="mb-2 text-sm font-medium">Color theme</div>
-						<div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
-							{#each THEMES as t}
-								{@const [c1, c2, c3, c4] = themeQuad(t.id)}
-								<button
-									onclick={() => colorTheme.set(t.id)}
-									class="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors {colorTheme.id === t.id
-										? 'border-neutral-900 bg-neutral-50 dark:border-white dark:bg-white/10'
-										: 'border-neutral-200 hover:bg-neutral-50 dark:border-white/10 dark:hover:bg-white/5'}"
-								>
-									<svg width="14" height="14" viewBox="0 0 16 16" class="shrink-0">
+						<ToggleGroup.Root
+							type="single"
+							value={colorTheme.id}
+							onValueChange={(value) => {
+								if (value) colorTheme.set(value);
+							}}
+							class="theme-grid"
+							aria-label="Color theme"
+						>
+							{#each THEMES as option (option.id)}
+								{@const [c1, c2, c3, c4] = themeQuad(option.id)}
+								<ToggleGroup.Item value={option.id} class="theme-option">
+									<svg
+										width="16"
+										height="16"
+										viewBox="0 0 16 16"
+										class="shrink-0"
+										aria-hidden="true"
+									>
 										<rect x="0" y="0" width="7" height="7" fill={c1} rx="1.5" />
 										<rect x="9" y="0" width="7" height="7" fill={c2} rx="1.5" />
 										<rect x="0" y="9" width="7" height="7" fill={c3} rx="1.5" />
 										<rect x="9" y="9" width="7" height="7" fill={c4} rx="1.5" />
 									</svg>
-									<span class="truncate">{t.name}</span>
-									{#if colorTheme.id === t.id}
-										<svg class="ml-auto shrink-0" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-											<polyline points="20 6 9 17 4 12" />
-										</svg>
-									{/if}
-								</button>
+									<span class="truncate">{option.name}</span>
+									{#if colorTheme.id === option.id}<span class="ml-auto" aria-hidden="true">✓</span
+										>{/if}
+								</ToggleGroup.Item>
 							{/each}
-						</div>
+						</ToggleGroup.Root>
 					</div>
 				</div>
 			</div>
 
 			{#if !auth.user?.is_oidc}
-			<div class="rounded-xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900">
-				<h2 class="mb-4 font-semibold">Change Password</h2>
-				<form onsubmit={handleChangePassword} class="space-y-3">
-					<div>
-						<label class="mb-1 block text-sm font-medium" for="cur-pw">Current password</label>
-						<input id="cur-pw" type="password" bind:value={currentPw} required autocomplete="current-password"
-							class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:ring-white/30" />
-					</div>
-					<div>
-						<label class="mb-1 block text-sm font-medium" for="new-pw">New password</label>
-						<input id="new-pw" type="password" bind:value={newPw} required autocomplete="new-password"
-							class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:ring-white/30" />
-					</div>
-					<div>
-						<label class="mb-1 block text-sm font-medium" for="confirm-pw">Confirm new password</label>
-						<input id="confirm-pw" type="password" bind:value={confirmPw} required autocomplete="new-password"
-							class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:ring-white/30" />
-					</div>
-					{#if pwError}
-						<p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">{pwError}</p>
-					{/if}
-					{#if pwSuccess}
-						<p class="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400">{pwSuccess}</p>
-					{/if}
-					<button type="submit" disabled={pwSubmitting}
-						class="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900">
-						{pwSubmitting ? 'Updating…' : 'Update password'}
-					</button>
-				</form>
-			</div>
+				<div
+					class="rounded-xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900"
+				>
+					<h2 class="mb-4 font-semibold">Change Password</h2>
+					<form onsubmit={handleChangePassword} class="space-y-3">
+						<div>
+							<label class="mb-1 block text-sm font-medium" for="cur-pw">Current password</label>
+							<input
+								id="cur-pw"
+								type="password"
+								bind:value={currentPw}
+								required
+								autocomplete="current-password"
+								class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:ring-white/30"
+							/>
+						</div>
+						<div>
+							<label class="mb-1 block text-sm font-medium" for="new-pw">New password</label>
+							<input
+								id="new-pw"
+								type="password"
+								bind:value={newPw}
+								required
+								minlength={MIN_PASSWORD_LENGTH}
+								autocomplete="new-password"
+								class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:ring-white/30"
+							/>
+						</div>
+						<div>
+							<label class="mb-1 block text-sm font-medium" for="confirm-pw"
+								>Confirm new password</label
+							>
+							<input
+								id="confirm-pw"
+								type="password"
+								bind:value={confirmPw}
+								required
+								minlength={MIN_PASSWORD_LENGTH}
+								autocomplete="new-password"
+								class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:ring-white/30"
+							/>
+						</div>
+						{#if pwError}
+							<p
+								class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400"
+							>
+								{pwError}
+							</p>
+						{/if}
+						{#if pwSuccess}
+							<p
+								class="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400"
+							>
+								{pwSuccess}
+							</p>
+						{/if}
+						<button
+							type="submit"
+							disabled={pwSubmitting}
+							class="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+						>
+							{pwSubmitting ? 'Updating…' : 'Update password'}
+						</button>
+					</form>
+				</div>
 			{/if}
 		</div>
 
-	<!-- Users Tab (admin) -->
+		<!-- Users Tab (admin) -->
 	{:else if tab === 'users'}
 		<div class="space-y-6">
 			<!-- Add user -->
-			<div class="rounded-xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900">
+			<div
+				class="rounded-xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900"
+			>
 				<h2 class="mb-4 font-semibold">Add User</h2>
 				<form onsubmit={handleCreateUser} class="space-y-3">
-					<div class="grid grid-cols-2 gap-3">
+					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 						<div>
 							<label class="mb-1 block text-sm font-medium" for="new-user">Username</label>
-							<input id="new-user" type="text" bind:value={newUsername} required
-								class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30" />
+							<input
+								id="new-user"
+								type="text"
+								bind:value={newUsername}
+								required
+								class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+							/>
 						</div>
 						<div>
-							<label class="mb-1 block text-sm font-medium" for="new-user-email">Email address</label>
-							<input id="new-user-email" type="email" bind:value={newEmail} required
-								class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30" />
+							<label class="mb-1 block text-sm font-medium" for="new-user-email"
+								>Email address</label
+							>
+							<input
+								id="new-user-email"
+								type="email"
+								bind:value={newEmail}
+								required
+								class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+							/>
 						</div>
 					</div>
 					<div>
 						<label class="mb-1 block text-sm font-medium" for="new-user-pw">Password</label>
-						<input id="new-user-pw" type="password" bind:value={newPassword} required autocomplete="new-password"
-							class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30" />
+						<input
+							id="new-user-pw"
+							type="password"
+							bind:value={newPassword}
+							required
+							minlength={MIN_PASSWORD_LENGTH}
+							autocomplete="new-password"
+							class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+						/>
 					</div>
 					<label class="flex items-center gap-2 text-sm">
 						<input type="checkbox" bind:checked={newIsAdmin} class="rounded" />
 						Grant admin privileges
 					</label>
 					{#if createError}
-						<p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">{createError}</p>
+						<p
+							class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400"
+						>
+							{createError}
+						</p>
 					{/if}
 					{#if createSuccess}
-						<p class="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400">{createSuccess}</p>
+						<p
+							class="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400"
+						>
+							{createSuccess}
+						</p>
 					{/if}
-					<button type="submit" disabled={createSubmitting}
-						class="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900">
+					<button
+						type="submit"
+						disabled={createSubmitting}
+						class="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+					>
 						{createSubmitting ? 'Creating…' : 'Create user'}
 					</button>
 				</form>
 			</div>
 
 			<!-- User list -->
-			<div class="rounded-xl border border-neutral-200 bg-white dark:border-white/10 dark:bg-neutral-900">
+			<div
+				class="rounded-xl border border-neutral-200 bg-white dark:border-white/10 dark:bg-neutral-900"
+			>
 				<div class="border-b border-neutral-200 px-5 py-4 dark:border-white/10">
 					<h2 class="font-semibold">Users</h2>
 				</div>
@@ -410,53 +542,103 @@
 							<li class="px-5 py-3">
 								{#if editTarget === u.username}
 									<!-- Inline edit form -->
-									<form onsubmit={(e) => { e.preventDefault(); handleEditUser(u.username); }} class="space-y-3">
+									<form
+										onsubmit={(e) => {
+											e.preventDefault();
+											handleEditUser(u.username);
+										}}
+										class="space-y-3"
+									>
 										<div class="grid grid-cols-2 gap-3">
 											<div>
-												<label class="mb-1 block text-xs font-medium text-neutral-500 dark:text-white/40">Username</label>
-												<input type="text" bind:value={editUsername} required
-													class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-sm outline-none focus:border-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30" />
+												<label
+													class="mb-1 block text-xs font-medium text-neutral-500 dark:text-white/40"
+													for="edit-username">Username</label
+												>
+												<input
+													id="edit-username"
+													type="text"
+													bind:value={editUsername}
+													required
+													class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-sm outline-none focus:border-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+												/>
 											</div>
 											<div>
-												<label class="mb-1 block text-xs font-medium text-neutral-500 dark:text-white/40">Email address</label>
-												<input type="email" bind:value={editEmail} required
-													class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-sm outline-none focus:border-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30" />
+												<label
+													class="mb-1 block text-xs font-medium text-neutral-500 dark:text-white/40"
+													for="edit-email">Email address</label
+												>
+												<input
+													id="edit-email"
+													type="email"
+													bind:value={editEmail}
+													required
+													class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-sm outline-none focus:border-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30"
+												/>
 											</div>
 										</div>
-										<label class="flex items-center gap-2 text-sm {u.is_admin && adminCount <= 1 ? 'cursor-not-allowed opacity-50' : ''}">
-											<input type="checkbox" bind:checked={editIsAdmin} disabled={u.is_admin && adminCount <= 1} class="rounded" />
+										<label
+											class="flex items-center gap-2 text-sm {u.is_admin && adminCount <= 1
+												? 'cursor-not-allowed opacity-50'
+												: ''}"
+										>
+											<input
+												type="checkbox"
+												bind:checked={editIsAdmin}
+												disabled={u.is_admin && adminCount <= 1}
+												class="rounded"
+											/>
 											Admin
 											{#if u.is_admin && adminCount <= 1}
-												<span class="text-xs text-neutral-400 dark:text-white/30">(last admin)</span>
+												<span class="text-xs text-neutral-400 dark:text-white/30">(last admin)</span
+												>
 											{/if}
 										</label>
 										{#if editError}
 											<p class="text-xs text-red-500 dark:text-red-400">{editError}</p>
 										{/if}
 										<div class="flex gap-2">
-											<button type="submit" disabled={editSubmitting}
-												class="rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900">
+											<button
+												type="submit"
+												disabled={editSubmitting}
+												class="rounded-lg bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+											>
 												{editSubmitting ? 'Saving…' : 'Save'}
 											</button>
-											<button type="button" onclick={() => { editTarget = null; editError = ''; }}
-												class="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs hover:bg-neutral-100 dark:border-white/10 dark:hover:bg-white/5">
+											<button
+												type="button"
+												onclick={() => {
+													editTarget = null;
+													editError = '';
+												}}
+												class="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs hover:bg-neutral-100 dark:border-white/10 dark:hover:bg-white/5"
+											>
 												Cancel
 											</button>
 										</div>
 									</form>
 								{:else}
 									<div class="flex items-center gap-3">
-										<div class="flex-1 min-w-0">
+										<div class="min-w-0 flex-1">
 											<div class="flex items-center gap-2">
-												<span class="font-medium text-sm">{u.username}</span>
+												<span class="text-sm font-medium">{u.username}</span>
 												{#if u.is_admin}
-													<span class="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">Admin</span>
+													<span
+														class="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-400"
+														>Admin</span
+													>
 												{/if}
 												{#if u.username === auth.user?.username}
-													<span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-500 dark:bg-white/10 dark:text-white/40">You</span>
+													<span
+														class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-500 dark:bg-white/10 dark:text-white/40"
+														>You</span
+													>
 												{/if}
 												{#if u.is_oidc}
-													<span class="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-500/15 dark:text-sky-400">SSO</span>
+													<span
+														class="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 dark:bg-sky-500/15 dark:text-sky-400"
+														>SSO</span
+													>
 												{/if}
 											</div>
 											{#if u.email}
@@ -468,33 +650,68 @@
 										</div>
 										<div class="flex items-center gap-2">
 											{#if resetTarget === u.username}
-												<form onsubmit={(e) => { e.preventDefault(); handleResetPassword(u.username); }} class="flex items-center gap-2">
-													<input type="password" bind:value={resetPw} placeholder="New password" required autocomplete="new-password"
-														class="rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs outline-none focus:border-neutral-400 dark:border-white/10 dark:bg-white/5" />
-													{#if resetError}<span class="text-xs text-red-500">{resetError}</span>{/if}
-													<button type="submit" disabled={resetSubmitting}
-														class="rounded-lg border border-neutral-200 px-2 py-1 text-xs hover:bg-neutral-100 dark:border-white/10 dark:hover:bg-white/5 disabled:opacity-50">
+												<form
+													onsubmit={(e) => {
+														e.preventDefault();
+														handleResetPassword(u.username);
+													}}
+													class="flex items-center gap-2"
+												>
+													<input
+														type="password"
+														bind:value={resetPw}
+														placeholder="New password"
+														required
+														minlength={MIN_PASSWORD_LENGTH}
+														autocomplete="new-password"
+														class="rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs outline-none focus:border-neutral-400 dark:border-white/10 dark:bg-white/5"
+													/>
+													{#if resetError}<span class="text-xs text-red-500">{resetError}</span
+														>{/if}
+													<button
+														type="submit"
+														disabled={resetSubmitting}
+														class="rounded-lg border border-neutral-200 px-2 py-1 text-xs hover:bg-neutral-100 disabled:opacity-50 dark:border-white/10 dark:hover:bg-white/5"
+													>
 														{resetSubmitting ? '…' : 'Save'}
 													</button>
-													<button type="button" onclick={() => { resetTarget = null; resetPw = ''; resetError = ''; }}
-														class="rounded-lg border border-neutral-200 px-2 py-1 text-xs hover:bg-neutral-100 dark:border-white/10 dark:hover:bg-white/5">
+													<button
+														type="button"
+														onclick={() => {
+															resetTarget = null;
+															resetPw = '';
+															resetError = '';
+														}}
+														class="rounded-lg border border-neutral-200 px-2 py-1 text-xs hover:bg-neutral-100 dark:border-white/10 dark:hover:bg-white/5"
+													>
 														Cancel
 													</button>
 												</form>
 											{:else}
-												<button onclick={() => startEdit(u)}
-													class="rounded-lg border border-neutral-200 px-2 py-1.5 text-xs text-neutral-500 hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5">
+												<button
+													onclick={() => startEdit(u)}
+													class="rounded-lg border border-neutral-200 px-2 py-1.5 text-xs text-neutral-500 hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5"
+												>
 													Edit
 												</button>
 												{#if !u.is_oidc}
-												<button onclick={() => { resetTarget = u.username; resetPw = ''; resetError = ''; editTarget = null; }}
-													class="rounded-lg border border-neutral-200 px-2 py-1.5 text-xs text-neutral-500 hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5">
-													Reset password
-												</button>
+													<button
+														onclick={() => {
+															resetTarget = u.username;
+															resetPw = '';
+															resetError = '';
+															editTarget = null;
+														}}
+														class="rounded-lg border border-neutral-200 px-2 py-1.5 text-xs text-neutral-500 hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5"
+													>
+														Reset password
+													</button>
 												{/if}
 												{#if u.username !== auth.user?.username}
-													<button onclick={() => handleDeleteUser(u.username)}
-														class="rounded-lg border border-red-200 px-2 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10">
+													<button
+														onclick={() => (deleteTarget = u.username)}
+														class="rounded-lg border border-red-200 px-2 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+													>
 														Delete
 													</button>
 												{/if}
@@ -509,20 +726,25 @@
 			</div>
 		</div>
 
-	<!-- Site Tab (admin) -->
+		<!-- Site Tab (admin) -->
 	{:else if tab === 'site'}
 		<div class="space-y-6">
-			<div class="rounded-xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900">
+			<div
+				class="rounded-xl border border-neutral-200 bg-white p-6 dark:border-white/10 dark:bg-neutral-900"
+			>
 				<div class="mb-1 flex items-center justify-between">
 					<h2 class="font-semibold">AI Analysis Prompt</h2>
 					<button
 						type="button"
 						onclick={resetPrompt}
 						class="rounded-lg border border-neutral-200 px-2.5 py-1 text-xs text-neutral-500 hover:bg-neutral-100 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/5"
-					>Reset to default</button>
+						>Reset to default</button
+					>
 				</div>
 				<p class="mb-4 text-sm text-neutral-500 dark:text-white/40">
-					Instructions sent to Ollama before the traffic data. Use <code class="rounded bg-neutral-100 px-1 dark:bg-white/10">{'{summary}'}</code> where the generated traffic stats should appear — it is required.
+					Instructions sent to Ollama before the traffic data. Use <code
+						class="rounded bg-neutral-100 px-1 dark:bg-white/10">{'{summary}'}</code
+					> where the generated traffic stats should appear — it is required.
 				</p>
 
 				{#if promptLoading}
@@ -536,13 +758,24 @@
 							class="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 font-mono text-xs leading-relaxed outline-none focus:border-neutral-400 focus:ring-1 focus:ring-neutral-400 dark:border-white/10 dark:bg-white/5 dark:focus:border-white/30 dark:focus:ring-white/30"
 						></textarea>
 						{#if promptError}
-							<p class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">{promptError}</p>
+							<p
+								class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400"
+							>
+								{promptError}
+							</p>
 						{/if}
 						{#if promptSuccess}
-							<p class="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400">{promptSuccess}</p>
+							<p
+								class="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-400"
+							>
+								{promptSuccess}
+							</p>
 						{/if}
-						<button type="submit" disabled={promptSubmitting}
-							class="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900">
+						<button
+							type="submit"
+							disabled={promptSubmitting}
+							class="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50 dark:bg-white dark:text-neutral-900"
+						>
 							{promptSubmitting ? 'Saving…' : 'Save prompt'}
 						</button>
 					</form>
@@ -551,3 +784,100 @@
 		</div>
 	{/if}
 </div>
+
+{#if deleteTarget}
+	{@const username = deleteTarget}
+	<ConfirmDialog
+		open={true}
+		onOpenChange={(open) => {
+			if (!open) deleteTarget = null;
+		}}
+		title="Delete user?"
+		description={`Delete “${username}”? This action cannot be undone.`}
+		confirmLabel="Delete user"
+		onconfirm={() => handleDeleteUser(username)}
+	/>
+{/if}
+
+<style>
+	:global(.settings-tabs) {
+		width: fit-content;
+		max-width: 100%;
+		overflow-x: auto;
+	}
+
+	:global(.settings-tabs .segmented-item) {
+		color: var(--app-muted);
+		font-weight: 550;
+		letter-spacing: 0.01em;
+	}
+
+	:global(.settings-tabs .segmented-item:hover) {
+		background: var(--app-surface-muted);
+		color: var(--app-fg);
+	}
+
+	:global(.settings-tabs .segmented-item[data-state='active']),
+	:global(.settings-tabs .segmented-item[aria-selected='true']) {
+		background: var(--app-fg);
+		color: var(--app-bg);
+		font-weight: 620;
+		box-shadow: none;
+	}
+
+	:global(.settings-tabs .segmented-item[data-state='active']:hover),
+	:global(.settings-tabs .segmented-item[aria-selected='true']:hover) {
+		background: color-mix(in oklch, var(--app-fg) 88%, var(--app-bg));
+		color: var(--app-bg);
+	}
+
+	.setting-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	:global(.theme-grid) {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.5rem;
+	}
+
+	:global(.theme-option) {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		min-height: 44px;
+		padding: 0.65rem 0.75rem;
+		border: 1px solid var(--app-border);
+		border-radius: var(--radius-sm);
+		background: var(--app-surface);
+		font-size: 0.82rem;
+		text-align: left;
+		transition:
+			border-color 140ms ease,
+			background 140ms ease;
+	}
+
+	:global(.theme-option:hover) {
+		border-color: var(--app-border-strong);
+		background: var(--app-surface-muted);
+	}
+
+	:global(.theme-option[data-state='on']) {
+		border-color: var(--app-fg);
+		background: var(--app-surface-muted);
+	}
+
+	@media (max-width: 720px) {
+		.setting-row {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		:global(.theme-grid) {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+</style>

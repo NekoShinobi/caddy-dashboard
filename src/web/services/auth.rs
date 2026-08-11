@@ -1,4 +1,4 @@
-use actix_web::{get, post, put, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, get, post, put, web};
 use redb::Database;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
@@ -6,13 +6,19 @@ use std::sync::LazyLock;
 async fn oidc_logout_url(id_token: Option<&str>, req: &HttpRequest) -> Option<String> {
     let disc = crate::oidc::fetch_discovery().await.ok()?;
     let endpoint = disc.end_session_endpoint.as_deref()?;
-    let base = crate::env::BASE_URL.as_deref().map(|s| s.to_string()).unwrap_or_else(|| {
-        let ci = req.connection_info();
-        format!("{}://{}", ci.scheme(), ci.host())
-    });
+    let base = crate::env::BASE_URL
+        .as_deref()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            let ci = req.connection_info();
+            format!("{}://{}", ci.scheme(), ci.host())
+        });
     let post_logout = urlencoding::encode(&base);
     Some(if let Some(tok) = id_token {
-        format!("{endpoint}?id_token_hint={}&post_logout_redirect_uri={post_logout}", urlencoding::encode(tok))
+        format!(
+            "{endpoint}?id_token_hint={}&post_logout_redirect_uri={post_logout}",
+            urlencoding::encode(tok)
+        )
     } else {
         format!("{endpoint}?post_logout_redirect_uri={post_logout}")
     })
@@ -30,7 +36,13 @@ struct UserResponse {
 impl From<crate::auth::User> for UserResponse {
     fn from(u: crate::auth::User) -> Self {
         let is_oidc = u.password_hash.starts_with("oidc:");
-        Self { username: u.username, email: u.email, is_admin: u.is_admin, created_at: u.created_at, is_oidc }
+        Self {
+            username: u.username,
+            email: u.email,
+            is_admin: u.is_admin,
+            created_at: u.created_at,
+            is_oidc,
+        }
     }
 }
 
@@ -79,25 +91,37 @@ pub async fn login(
     // Apply progressive delay for accounts with prior failures
     let prior_failures = throttle.fail_count(&body.username);
     if prior_failures > 10 {
-        log::warn!("login: throttling '{}' for 5s ({prior_failures} failures)", body.username);
+        log::warn!(
+            "login: throttling '{}' for 5s ({prior_failures} failures)",
+            body.username
+        );
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     } else if prior_failures > 5 {
-        log::warn!("login: throttling '{}' for 1s ({prior_failures} failures)", body.username);
+        log::warn!(
+            "login: throttling '{}' for 1s ({prior_failures} failures)",
+            body.username
+        );
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 
     // Always run verify_password even when the user doesn't exist so that
     // response time is identical regardless of username validity.
     let (user_opt, hash) = match crate::db::get_user(&db, &body.username) {
-        Some(u) => { let h = u.password_hash.clone(); (Some(u), h) }
-        None    => (None, DUMMY_HASH.clone()),
+        Some(u) => {
+            let h = u.password_hash.clone();
+            (Some(u), h)
+        }
+        None => (None, DUMMY_HASH.clone()),
     };
 
     let valid = crate::auth::verify_password(&body.password, &hash);
 
     if user_opt.is_none() || !valid {
         let count = throttle.record_failure(&body.username);
-        log::warn!("login: failed attempt for '{}' (total failures: {count})", body.username);
+        log::warn!(
+            "login: failed attempt for '{}' (total failures: {count})",
+            body.username
+        );
         return HttpResponse::Unauthorized()
             .json(serde_json::json!({"error": "Invalid credentials"}));
     }
@@ -156,16 +180,16 @@ pub async fn signup(
     body: web::Json<SignupBody>,
 ) -> HttpResponse {
     if *crate::env::OIDC_DISABLE_LOGIN && crate::oidc::is_enabled() {
-        return HttpResponse::Forbidden()
-            .json(serde_json::json!({"error": "Local accounts are disabled. Use SSO to sign in."}));
+        return HttpResponse::Forbidden().json(
+            serde_json::json!({"error": "Local accounts are disabled. Use SSO to sign in."}),
+        );
     }
     if crate::db::user_count(&db) > 0 {
         return HttpResponse::Forbidden()
             .json(serde_json::json!({"error": "Setup already complete"}));
     }
     if body.username.trim().is_empty() {
-        return HttpResponse::BadRequest()
-            .json(serde_json::json!({"error": "Username required"}));
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "Username required"}));
     }
     if body.password.len() < 8 {
         return HttpResponse::BadRequest()
@@ -227,17 +251,16 @@ pub async fn change_password(
     body: web::Json<ChangePasswordBody>,
 ) -> HttpResponse {
     let Some(username) = crate::session::get_username(&req, &db) else {
-        return HttpResponse::Unauthorized()
-            .json(serde_json::json!({"error": "unauthorized"}));
+        return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}));
     };
     let Some(user) = crate::db::get_user(&db, &username) else {
         log::error!("change_password: session valid but user '{username}' not found in DB");
-        return HttpResponse::Unauthorized()
-            .json(serde_json::json!({"error": "unauthorized"}));
+        return HttpResponse::Unauthorized().json(serde_json::json!({"error": "unauthorized"}));
     };
     if user.password_hash.starts_with("oidc:") {
-        return HttpResponse::BadRequest()
-            .json(serde_json::json!({"error": "OIDC-managed accounts cannot change their password here"}));
+        return HttpResponse::BadRequest().json(
+            serde_json::json!({"error": "OIDC-managed accounts cannot change their password here"}),
+        );
     }
     if !crate::auth::verify_password(&body.current_password, &user.password_hash) {
         log::warn!("change_password: wrong current password for '{username}'");

@@ -1,4 +1,4 @@
-use actix_web::{get, web, HttpResponse};
+use actix_web::{HttpResponse, get, web};
 use redb::Database;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -27,10 +27,7 @@ struct IpReport {
 }
 
 #[get("/reports/error-rates")]
-pub async fn get_error_rates(
-    db: web::Data<Database>,
-    query: web::Query<Query>,
-) -> HttpResponse {
+pub async fn get_error_rates(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
     let min_requests = query.min_requests.unwrap_or(5);
     let all = match crate::db::load_entries(&db) {
         Ok(v) => v,
@@ -86,9 +83,7 @@ pub async fn get_error_rates(
 
     let mut reports: Vec<IpReport> = by_ip
         .into_iter()
-        .filter(|(_, acc)| {
-            acc.total >= min_requests && (acc.errors_4xx + acc.errors_5xx) > 0
-        })
+        .filter(|(_, acc)| acc.total >= min_requests && (acc.errors_4xx + acc.errors_5xx) > 0)
         .map(|(ip, acc)| {
             let mut endpoints: Vec<EndpointStat> = acc
                 .endpoints
@@ -97,7 +92,12 @@ pub async fn get_error_rates(
                     let errors: usize = codes.values().sum();
                     let mut codes_vec: Vec<(u16, usize)> = codes.into_iter().collect();
                     codes_vec.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-                    EndpointStat { method, path, errors, codes: codes_vec }
+                    EndpointStat {
+                        method,
+                        path,
+                        errors,
+                        codes: codes_vec,
+                    }
                 })
                 .collect();
             endpoints.sort_unstable_by(|a, b| b.errors.cmp(&a.errors));
@@ -113,9 +113,8 @@ pub async fn get_error_rates(
         .collect();
 
     // Sort by total errors descending
-    reports.sort_unstable_by(|a, b| {
-        (b.errors_4xx + b.errors_5xx).cmp(&(a.errors_4xx + a.errors_5xx))
-    });
+    reports
+        .sort_unstable_by(|a, b| (b.errors_4xx + b.errors_5xx).cmp(&(a.errors_4xx + a.errors_5xx)));
 
     HttpResponse::Ok().json(reports)
 }
@@ -133,10 +132,7 @@ struct LargePayload {
 }
 
 #[get("/reports/large-payloads")]
-pub async fn get_large_payloads(
-    db: web::Data<Database>,
-    query: web::Query<Query>,
-) -> HttpResponse {
+pub async fn get_large_payloads(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
     let all = match crate::db::load_entries(&db) {
         Ok(v) => v,
         Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
@@ -158,7 +154,11 @@ pub async fn get_large_payloads(
             uri: e.request.uri,
             status: e.status,
             size: e.size,
-            ip: if e.request.client_ip.is_empty() { e.request.remote_ip } else { e.request.client_ip },
+            ip: if e.request.client_ip.is_empty() {
+                e.request.remote_ip
+            } else {
+                e.request.client_ip
+            },
             duration: e.duration,
         })
         .collect();

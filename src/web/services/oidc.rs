@@ -1,4 +1,4 @@
-use actix_web::{get, web, HttpRequest, HttpResponse};
+use actix_web::{HttpRequest, HttpResponse, get, web};
 use redb::Database;
 use serde::Deserialize;
 
@@ -31,8 +31,7 @@ pub async fn config() -> HttpResponse {
 #[get("/auth/oidc/login")]
 pub async fn login(req: HttpRequest) -> HttpResponse {
     if !crate::oidc::is_enabled() {
-        return HttpResponse::NotFound()
-            .json(serde_json::json!({"error": "OIDC not configured"}));
+        return HttpResponse::NotFound().json(serde_json::json!({"error": "OIDC not configured"}));
     }
     let disc = match crate::oidc::fetch_discovery().await {
         Ok(d) => d,
@@ -86,8 +85,7 @@ pub async fn callback(
     query: web::Query<CallbackQuery>,
 ) -> HttpResponse {
     if !crate::oidc::is_enabled() {
-        return HttpResponse::NotFound()
-            .json(serde_json::json!({"error": "OIDC not configured"}));
+        return HttpResponse::NotFound().json(serde_json::json!({"error": "OIDC not configured"}));
     }
 
     if let Some(err) = &query.error {

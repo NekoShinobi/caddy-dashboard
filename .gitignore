@@ -18,3 +18,4 @@ data/
 access.log
 access-gen.log
 .dbip-cache/
+.od-skills/
