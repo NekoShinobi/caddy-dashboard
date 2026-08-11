@@ -34,3 +34,6 @@ compose.dev.yml
 
 # Note: .dbip-cache/ is deliberately NOT ignored. build.rs reads it to avoid
 # re-downloading the GeoIP database on every image build.
+
+# Dev container data — never belongs in a production image
+.devdata/

@@ -23,17 +23,18 @@ services:
       # directory also keeps this build from fighting the host's cargo lock.
       - cargo-cache:/usr/local/cargo/registry
       - target-cache:/app/target
-      # redb takes a file lock, so the container gets its own data directory
-      # rather than sharing ./data with a host `just dev`.
-      - dev-data:/app/data
+      # No volume for dev data: it lives in .devdata/ inside the bind-mounted
+      # repo so you can inspect it from the host. The entrypoint creates and
+      # chowns it. Declaring it as a named volume here would make Docker create
+      # the host directory root-owned before the entrypoint could run.
     environment:
       - PORT=${PORT:-9080}
       - LOG_PATH=${LOG_PATH:-access.log}
-      - DATA_DIR=/app/data
+      - DATA_DIR=/app/.devdata
       - RUST_LOG=${RUST_LOG:-info}
       # Named volumes arrive root-owned; the entrypoint chowns these before
       # dropping to DEV_UID. Omitting /app/data is what made redb fail to open.
-      - DEV_CHOWN_PATHS=/app/target /app/data /usr/local/cargo/registry /usr/local/cargo/git
+      - DEV_CHOWN_PATHS=/app/target /app/.devdata /usr/local/cargo/registry /usr/local/cargo/git
     command: bacon --headless run
 
   ui:
@@ -74,7 +75,6 @@ services:
 volumes:
   cargo-cache:
   target-cache:
-  dev-data:
   ui-node-modules:
   ui-svelte-kit:
   ui-bun-cache:

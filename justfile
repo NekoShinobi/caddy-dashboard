@@ -170,7 +170,7 @@ deps-outdated:
     cargo update --dry-run
     cd ui && bun outdated
 
-# Refresh lockfiles, ignoring releases younger than the cooldown.
+# Refresh lockfiles within the declared semver ranges, honouring the cooldown.
 [group('deps')]
 deps-update:
     #!/usr/bin/env bash
@@ -186,7 +186,20 @@ deps-update:
       exit 1
     fi
 
+    # Deliberately NOT `bun update --latest`: that ignores the semver ranges in
+    # package.json and walks every dependency to its newest major. Doing so
+    # elsewhere took TypeScript from 5 to 7 in one step, which svelte-check does
+    # not support. Use `deps-update-major` when major bumps are the intent.
     cargo update -Z min-publish-age --config "registry.global-min-publish-age = \"${days} days\""
+    cd ui && bun update --minimum-release-age "$seconds"
+
+# Bump frontend dependencies across major versions (review, then run `just ci`).
+[group('deps')]
+deps-update-major:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # This ignores the semver ranges in package.json, so majors land in one go.
+    seconds="$(( {{ DEPS_MIN_AGE_DAYS }} * 24 * 60 * 60 ))"
     cd ui && bun update --latest --minimum-release-age "$seconds"
 
 # Scan dependencies for known vulnerabilities.

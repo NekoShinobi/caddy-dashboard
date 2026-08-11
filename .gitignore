@@ -19,3 +19,6 @@ access.log
 access-gen.log
 .dbip-cache/
 .od-skills/
+
+# Dev container data, inspectable from the host
+.devdata/
