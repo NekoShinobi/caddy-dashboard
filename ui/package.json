@@ -3,7 +3,7 @@
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
-	"packageManager": "bun@1.2.0",
+	"packageManager": "bun@1.4.0",
 	"scripts": {
 		"dev": "vite dev",
 		"dev:clean": "rm -rf .svelte-kit node_modules/.vite && vite dev --force",
