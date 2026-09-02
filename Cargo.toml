@@ -26,4 +26,4 @@ features = ["macros", "rt-multi-thread", "time", "sync"]
 
 [build-dependencies]
 flate2 = "1"
-ureq = "2"
+ureq = "3"
