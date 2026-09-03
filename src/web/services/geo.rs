@@ -37,6 +37,80 @@ fn top_ips(ip_counts: &HashMap<String, usize>, n: usize) -> Vec<String> {
     v.into_iter().take(n).map(|(ip, _)| ip.clone()).collect()
 }
 
+fn build_geo_response(
+    db: &Database,
+    geoip: &crate::geoip::GeoIpDb,
+    since: Option<f64>,
+    use_precise: bool,
+) -> Result<GeoResponse, String> {
+    if use_precise && geoip.is_some() {
+        // (lat_grid, lng_grid) -> (total_weight, ip -> count)
+        let mut grid: HashMap<(i64, i64), (f64, HashMap<String, usize>)> = HashMap::new();
+        crate::db::visit_logs_since(db, since, |entry| {
+            let ip_str = if entry.request.client_ip.is_empty() {
+                &entry.request.remote_ip
+            } else {
+                &entry.request.client_ip
+            };
+            let Ok(ip) = ip_str.parse::<std::net::IpAddr>() else {
+                return;
+            };
+            let Some((lat, lng)) = geoip.lookup_city(ip) else {
+                return;
+            };
+            let key = ((lat * 100.0).round() as i64, (lng * 100.0).round() as i64);
+            let point = grid.entry(key).or_insert_with(|| (0.0, HashMap::new()));
+            point.0 += 1.0;
+            *point.1.entry(ip_str.to_owned()).or_insert(0) += 1;
+        })?;
+
+        let points = grid
+            .into_iter()
+            .map(|((lat, lng), (weight, ips))| PrecisePoint {
+                lat: lat as f64 / 100.0,
+                lng: lng as f64 / 100.0,
+                count: weight as u64,
+                top_ips: top_ips(&ips, 10),
+            })
+            .collect();
+        return Ok(GeoResponse::Precise { points });
+    }
+
+    // country -> (count, ip -> count)
+    let mut counts: HashMap<String, (usize, HashMap<String, usize>)> = HashMap::new();
+    crate::db::visit_logs_since(db, since, |entry| {
+        let Some(code) = entry
+            .request
+            .headers
+            .get("Cf-Ipcountry")
+            .and_then(|codes| codes.first())
+        else {
+            return;
+        };
+        let ip = if entry.request.client_ip.is_empty() {
+            &entry.request.remote_ip
+        } else {
+            &entry.request.client_ip
+        };
+        let country = counts
+            .entry(code.clone())
+            .or_insert_with(|| (0, HashMap::new()));
+        country.0 += 1;
+        *country.1.entry(ip.to_owned()).or_insert(0) += 1;
+    })?;
+
+    let mut data: Vec<CountryCount> = counts
+        .into_iter()
+        .map(|(country, (count, ips))| CountryCount {
+            country,
+            count,
+            top_ips: top_ips(&ips, 10),
+        })
+        .collect();
+    data.sort_unstable_by(|a, b| b.count.cmp(&a.count));
+    Ok(GeoResponse::Country { data })
+}
+
 #[get("/geo")]
 async fn get_geo(
     db: web::Data<Database>,
@@ -49,74 +123,18 @@ async fn get_geo(
             .json(serde_json::json!({"error": "Invalid mode. Valid values: country, precise"}));
     }
 
-    let all = match crate::db::load_entries(&db) {
-        Ok(v) => v,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
-    };
-    let entries: Vec<_> = match query.since {
-        Some(since) => all.into_iter().filter(|e| e.ts >= since).collect(),
-        None => all,
-    };
-
     let use_precise = mode == "precise";
-
-    if use_precise && geoip.is_some() {
-        // (lat_grid, lng_grid) → (total_weight, ip → count)
-        let mut grid: HashMap<(i64, i64), (f64, HashMap<String, usize>)> = HashMap::new();
-        for e in &entries {
-            let ip_str = if e.request.client_ip.is_empty() {
-                &e.request.remote_ip
-            } else {
-                &e.request.client_ip
-            };
-            let Ok(ip) = ip_str.parse::<std::net::IpAddr>() else {
-                continue;
-            };
-            let Some((lat, lng)) = geoip.lookup_city(ip) else {
-                continue;
-            };
-            let key = ((lat * 100.0).round() as i64, (lng * 100.0).round() as i64);
-            let entry = grid.entry(key).or_insert((0.0, HashMap::new()));
-            entry.0 += 1.0;
-            *entry.1.entry(ip_str.to_string()).or_insert(0) += 1;
+    let since = query.since;
+    let db = db.into_inner();
+    let geoip = geoip.into_inner();
+    match web::block(move || build_geo_response(&db, &geoip, since, use_precise)).await {
+        Ok(Ok(response)) => HttpResponse::Ok().json(response),
+        Ok(Err(error)) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": error}))
         }
-        let points: Vec<PrecisePoint> = grid
-            .into_iter()
-            .map(|((lat, lng), (w, ips))| PrecisePoint {
-                lat: lat as f64 / 100.0,
-                lng: lng as f64 / 100.0,
-                count: w as u64,
-                top_ips: top_ips(&ips, 10),
-            })
-            .collect();
-        return HttpResponse::Ok().json(GeoResponse::Precise { points });
-    }
-
-    // Country mode (default or MMDB unavailable)
-    // country → (count, ip → count)
-    let mut counts: HashMap<String, (usize, HashMap<String, usize>)> = HashMap::new();
-    for e in &entries {
-        if let Some(codes) = e.request.headers.get("Cf-Ipcountry") {
-            if let Some(code) = codes.first() {
-                let ip_str = if e.request.client_ip.is_empty() {
-                    e.request.remote_ip.clone()
-                } else {
-                    e.request.client_ip.clone()
-                };
-                let entry = counts.entry(code.clone()).or_insert((0, HashMap::new()));
-                entry.0 += 1;
-                *entry.1.entry(ip_str).or_insert(0) += 1;
-            }
+        Err(error) => {
+            log::error!("geo blocking task: {error}");
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Database error"}))
         }
     }
-    let mut data: Vec<CountryCount> = counts
-        .into_iter()
-        .map(|(country, (count, ips))| CountryCount {
-            country,
-            count,
-            top_ips: top_ips(&ips, 10),
-        })
-        .collect();
-    data.sort_unstable_by(|a, b| b.count.cmp(&a.count));
-    HttpResponse::Ok().json(GeoResponse::Country { data })
 }

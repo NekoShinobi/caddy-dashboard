@@ -25,20 +25,13 @@ Use markdown formatting.
 
 Provide your analysis and action items:";
 
-fn build_prompt(db: &Database, since: Option<f64>) -> Result<String, &'static str> {
-    let all = crate::db::load_entries(db).map_err(|_| "Database error")?;
+fn build_prompt(db: &Database, since: Option<f64>) -> Result<String, String> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs_f64();
     let cutoff = since.unwrap_or(now - 86400.0);
-    let entries: Vec<_> = all.into_iter().filter(|e| e.ts >= cutoff).collect();
-
-    if entries.is_empty() {
-        return Err("No log entries found in the last 24 hours.");
-    }
-
-    let total = entries.len();
+    let mut total = 0usize;
     let mut status_counts: HashMap<u16, usize> = HashMap::new();
     let mut path_counts: HashMap<String, usize> = HashMap::new();
     let mut ip_counts: HashMap<String, usize> = HashMap::new();
@@ -47,7 +40,8 @@ fn build_prompt(db: &Database, since: Option<f64>) -> Result<String, &'static st
     let mut ua_counts: HashMap<String, usize> = HashMap::new();
     let mut error_paths: HashMap<String, usize> = HashMap::new();
 
-    for e in &entries {
+    crate::db::visit_logs_since(db, Some(cutoff), |e| {
+        total += 1;
         *status_counts.entry(e.status).or_insert(0) += 1;
 
         // strip query string for path aggregation
@@ -82,6 +76,10 @@ fn build_prompt(db: &Database, since: Option<f64>) -> Result<String, &'static st
                 *ua_counts.entry(key).or_insert(0) += 1;
             }
         }
+    })?;
+
+    if total == 0 {
+        return Err("No log entries found in the last 24 hours.".to_string());
     }
 
     let s2xx: usize = status_counts

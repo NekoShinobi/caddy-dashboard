@@ -46,6 +46,8 @@
 	let mode = $state<GeoMode>('country');
 	let noGeoip = $state(false);
 	let selectedPoint = $state<SelectedPoint | null>(null);
+	let requestController: AbortController | null = null;
+	let destroyed = false;
 
 	function accent() {
 		return colorTheme.theme[theme.dark ? 'dark' : 'light'].blue;
@@ -65,6 +67,9 @@
 
 	async function fetchAndPlot(nextMode: GeoMode = mode) {
 		if (!leafletMap || !L) return;
+		requestController?.abort();
+		const controller = new AbortController();
+		requestController = controller;
 		loading = true;
 		error = '';
 		noGeoip = false;
@@ -74,12 +79,15 @@
 			const since = timeRange.sinceParam();
 			if (since) params.set('since', since);
 			if (nextMode === 'cluster') params.set('mode', 'precise');
-			const res = await fetch(`/api/geo${params.size ? `?${params}` : ''}`);
+			const res = await fetch(`/api/geo${params.size ? `?${params}` : ''}`, {
+				signal: controller.signal
+			});
 			if (!res.ok) {
 				const response = await res.json().catch(() => ({}));
 				throw new Error(response.error ?? `HTTP ${res.status}`);
 			}
 			const json = await res.json();
+			if (destroyed || requestController !== controller || !leafletMap) return;
 
 			markers.forEach((marker) => marker.remove());
 			markers = [];
@@ -149,9 +157,13 @@
 				if (nextMode === 'cluster') noGeoip = true;
 			}
 		} catch (cause) {
+			if (cause instanceof DOMException && cause.name === 'AbortError') return;
 			error = cause instanceof Error ? cause.message : 'Failed to fetch geo data';
 		} finally {
-			loading = false;
+			if (requestController === controller && !destroyed) {
+				requestController = null;
+				loading = false;
+			}
 		}
 	}
 
@@ -162,11 +174,13 @@
 
 	async function initMap() {
 		if (!mapEl) return;
-		L = (await import('leaflet')).default;
+		const leaflet = (await import('leaflet')).default;
 		await import('leaflet/dist/leaflet.css');
 		await import('leaflet.markercluster');
 		await import('leaflet.markercluster/dist/MarkerCluster.css');
 		await import('leaflet.markercluster/dist/MarkerCluster.Default.css');
+		if (destroyed || !mapEl) return;
+		L = leaflet;
 
 		leafletMap = L.map(mapEl, {
 			zoomControl: true,
@@ -188,6 +202,8 @@
 
 	onMount(initMap);
 	onDestroy(() => {
+		destroyed = true;
+		requestController?.abort();
 		leafletMap?.remove();
 		leafletMap = null;
 	});

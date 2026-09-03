@@ -26,36 +26,29 @@ struct IpReport {
     top_endpoints: Vec<EndpointStat>,
 }
 
-#[get("/reports/error-rates")]
-pub async fn get_error_rates(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let min_requests = query.min_requests.unwrap_or(5);
-    let all = match crate::db::load_entries(&db) {
-        Ok(v) => v,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
-    };
-    let entries: Vec<_> = match query.since {
-        Some(since) => all.into_iter().filter(|e| e.ts >= since).collect(),
-        None => all,
-    };
+struct IpAccum {
+    total: usize,
+    errors_4xx: usize,
+    errors_5xx: usize,
+    // (method, path) -> status_code -> count
+    endpoints: HashMap<(String, String), HashMap<u16, usize>>,
+}
 
-    struct IpAccum {
-        total: usize,
-        errors_4xx: usize,
-        errors_5xx: usize,
-        // (method, path) → status_code → count
-        endpoints: HashMap<(String, String), HashMap<u16, usize>>,
-    }
-
+fn build_error_rates(
+    db: &Database,
+    since: Option<f64>,
+    min_requests: usize,
+) -> Result<Vec<IpReport>, String> {
     let mut by_ip: HashMap<String, IpAccum> = HashMap::new();
 
-    for e in &entries {
-        let ip = if e.request.client_ip.is_empty() {
-            e.request.remote_ip.clone()
+    crate::db::visit_logs_since(db, since, |entry| {
+        let ip = if entry.request.client_ip.is_empty() {
+            &entry.request.remote_ip
         } else {
-            e.request.client_ip.clone()
+            &entry.request.client_ip
         };
 
-        let acc = by_ip.entry(ip).or_insert(IpAccum {
+        let acc = by_ip.entry(ip.to_owned()).or_insert_with(|| IpAccum {
             total: 0,
             errors_4xx: 0,
             errors_5xx: 0,
@@ -63,23 +56,20 @@ pub async fn get_error_rates(db: web::Data<Database>, query: web::Query<Query>) 
         });
 
         acc.total += 1;
-
-        if e.status >= 400 && e.status < 500 {
+        if (400..500).contains(&entry.status) {
             acc.errors_4xx += 1;
-            *acc.endpoints
-                .entry((e.request.method.clone(), e.request.uri.clone()))
-                .or_default()
-                .entry(e.status)
-                .or_insert(0) += 1;
-        } else if e.status >= 500 {
+        } else if entry.status >= 500 {
             acc.errors_5xx += 1;
-            *acc.endpoints
-                .entry((e.request.method.clone(), e.request.uri.clone()))
-                .or_default()
-                .entry(e.status)
-                .or_insert(0) += 1;
+        } else {
+            return;
         }
-    }
+
+        *acc.endpoints
+            .entry((entry.request.method.clone(), entry.request.uri.clone()))
+            .or_default()
+            .entry(entry.status)
+            .or_insert(0) += 1;
+    })?;
 
     let mut reports: Vec<IpReport> = by_ip
         .into_iter()
@@ -89,14 +79,14 @@ pub async fn get_error_rates(db: web::Data<Database>, query: web::Query<Query>) 
                 .endpoints
                 .into_iter()
                 .map(|((method, path), codes)| {
-                    let errors: usize = codes.values().sum();
-                    let mut codes_vec: Vec<(u16, usize)> = codes.into_iter().collect();
-                    codes_vec.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+                    let errors = codes.values().sum();
+                    let mut codes: Vec<(u16, usize)> = codes.into_iter().collect();
+                    codes.sort_unstable_by(|a, b| b.1.cmp(&a.1));
                     EndpointStat {
                         method,
                         path,
                         errors,
-                        codes: codes_vec,
+                        codes,
                     }
                 })
                 .collect();
@@ -112,11 +102,26 @@ pub async fn get_error_rates(db: web::Data<Database>, query: web::Query<Query>) 
         })
         .collect();
 
-    // Sort by total errors descending
     reports
         .sort_unstable_by(|a, b| (b.errors_4xx + b.errors_5xx).cmp(&(a.errors_4xx + a.errors_5xx)));
+    Ok(reports)
+}
 
-    HttpResponse::Ok().json(reports)
+#[get("/reports/error-rates")]
+pub async fn get_error_rates(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
+    let min_requests = query.min_requests.unwrap_or(5);
+    let since = query.since;
+    let db = db.into_inner();
+    match web::block(move || build_error_rates(&db, since, min_requests)).await {
+        Ok(Ok(reports)) => HttpResponse::Ok().json(reports),
+        Ok(Err(error)) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": error}))
+        }
+        Err(error) => {
+            log::error!("error rates blocking task: {error}");
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Database error"}))
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -131,37 +136,50 @@ struct LargePayload {
     duration: f64,
 }
 
+fn build_large_payloads(db: &Database, since: Option<f64>) -> Result<Vec<LargePayload>, String> {
+    let mut payloads: Vec<LargePayload> = Vec::with_capacity(100);
+    crate::db::visit_logs_since(db, since, |entry| {
+        let insert_at = payloads.partition_point(|payload| payload.size >= entry.size);
+        if insert_at >= 100 {
+            return;
+        }
+
+        payloads.insert(
+            insert_at,
+            LargePayload {
+                ts: entry.ts,
+                method: entry.request.method.clone(),
+                host: entry.request.host.clone(),
+                uri: entry.request.uri.clone(),
+                status: entry.status,
+                size: entry.size,
+                ip: if entry.request.client_ip.is_empty() {
+                    entry.request.remote_ip.clone()
+                } else {
+                    entry.request.client_ip.clone()
+                },
+                duration: entry.duration,
+            },
+        );
+        if payloads.len() > 100 {
+            payloads.pop();
+        }
+    })?;
+    Ok(payloads)
+}
+
 #[get("/reports/large-payloads")]
 pub async fn get_large_payloads(db: web::Data<Database>, query: web::Query<Query>) -> HttpResponse {
-    let all = match crate::db::load_entries(&db) {
-        Ok(v) => v,
-        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
-    };
-    let mut entries: Vec<_> = match query.since {
-        Some(since) => all.into_iter().filter(|e| e.ts >= since).collect(),
-        None => all,
-    };
-
-    entries.sort_unstable_by(|a, b| b.size.cmp(&a.size));
-    entries.truncate(100);
-
-    let payloads: Vec<LargePayload> = entries
-        .into_iter()
-        .map(|e| LargePayload {
-            ts: e.ts,
-            method: e.request.method,
-            host: e.request.host,
-            uri: e.request.uri,
-            status: e.status,
-            size: e.size,
-            ip: if e.request.client_ip.is_empty() {
-                e.request.remote_ip
-            } else {
-                e.request.client_ip
-            },
-            duration: e.duration,
-        })
-        .collect();
-
-    HttpResponse::Ok().json(payloads)
+    let since = query.since;
+    let db = db.into_inner();
+    match web::block(move || build_large_payloads(&db, since)).await {
+        Ok(Ok(payloads)) => HttpResponse::Ok().json(payloads),
+        Ok(Err(error)) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": error}))
+        }
+        Err(error) => {
+            log::error!("large payloads blocking task: {error}");
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Database error"}))
+        }
+    }
 }

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import { marked } from 'marked';
@@ -46,8 +46,8 @@
 		duration: number;
 	}
 
-	let data = $state<IpReport[]>([]);
-	let payloads = $state<LargePayload[]>([]);
+	let data = $state.raw<IpReport[]>([]);
+	let payloads = $state.raw<LargePayload[]>([]);
 	let loading = $state(true);
 	let payloadsLoading = $state(true);
 	let error = $state('');
@@ -58,9 +58,33 @@
 	let aiError = $state('');
 	let aiDone = $state(false);
 	let aiSavedAt = $state<Date | null>(null);
-	let sanitizedAiHtml = $derived(renderMarkdown(aiText));
+	let sanitizedAiHtml = $state('');
+	let aiBuffer = '';
+	let aiRenderTimer: ReturnType<typeof setTimeout> | null = null;
+	let aiController: AbortController | null = null;
+	let reportController: AbortController | null = null;
+	let destroyed = false;
 
 	const AI_STORAGE_KEY = 'caddy-dashboard:ai-analysis';
+	const AI_RENDER_INTERVAL_MS = 100;
+
+	function isAbortError(error: unknown): boolean {
+		return error instanceof DOMException && error.name === 'AbortError';
+	}
+
+	function flushAiText() {
+		if (aiRenderTimer !== null) {
+			clearTimeout(aiRenderTimer);
+			aiRenderTimer = null;
+		}
+		aiText = aiBuffer;
+		sanitizedAiHtml = renderMarkdown(aiBuffer);
+	}
+
+	function scheduleAiRender() {
+		if (aiRenderTimer !== null) return;
+		aiRenderTimer = setTimeout(flushAiText, AI_RENDER_INTERVAL_MS);
+	}
 
 	onMount(() => {
 		try {
@@ -68,7 +92,8 @@
 			if (saved) {
 				const { text, ts } = JSON.parse(saved);
 				if (text) {
-					aiText = text;
+					aiBuffer = text;
+					flushAiText();
 					aiDone = true;
 					aiSavedAt = new Date(ts);
 				}
@@ -77,18 +102,24 @@
 	});
 
 	async function runAiAnalysis() {
+		aiController?.abort();
+		const controller = new AbortController();
+		aiController = controller;
+		aiBuffer = '';
 		aiText = '';
+		sanitizedAiHtml = '';
 		aiError = '';
 		aiDone = false;
 		aiSavedAt = null;
 		aiRunning = true;
+		let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 		try {
-			const res = await fetch('/api/reports/ai-analysis');
+			const res = await fetch('/api/reports/ai-analysis', { signal: controller.signal });
 			if (!res.ok || !res.body) {
 				const data = await res.json().catch(() => ({}));
 				throw new Error(data.error ?? `HTTP ${res.status}`);
 			}
-			const reader = res.body.getReader();
+			reader = res.body.getReader();
 			const decoder = new TextDecoder();
 			let buf = '';
 			while (true) {
@@ -101,24 +132,32 @@
 					if (!line.startsWith('data: ')) continue;
 					try {
 						const evt = JSON.parse(line.slice(6));
-						if (evt.token) aiText += evt.token;
+						if (evt.token) {
+							aiBuffer += evt.token;
+							scheduleAiRender();
+						}
 						if (evt.error) aiError = evt.error;
 						if (evt.done) aiDone = true;
 					} catch {}
 				}
 			}
 		} catch (e) {
+			if (isAbortError(e)) return;
 			aiError = e instanceof Error ? e.message : 'Analysis failed';
 		} finally {
+			reader?.releaseLock();
+			if (aiController !== controller || destroyed) return;
+			aiController = null;
+			flushAiText();
 			aiRunning = false;
 			aiDone = true;
-			if (aiText && !aiError) {
+			if (aiBuffer && !aiError) {
 				const now = new Date();
 				aiSavedAt = now;
 				try {
 					localStorage.setItem(
 						AI_STORAGE_KEY,
-						JSON.stringify({ text: aiText, ts: now.toISOString() })
+						JSON.stringify({ text: aiBuffer, ts: now.toISOString() })
 					);
 				} catch {}
 			}
@@ -138,6 +177,9 @@
 	}
 
 	async function fetchReport() {
+		reportController?.abort();
+		const controller = new AbortController();
+		reportController = controller;
 		loading = true;
 		payloadsLoading = true;
 		error = '';
@@ -147,8 +189,8 @@
 			if (since) params.set('since', since);
 			const qs = params.size ? `?${params}` : '';
 			const [errRes, payRes] = await Promise.all([
-				fetch(`/api/reports/error-rates${qs}`),
-				fetch(`/api/reports/large-payloads${qs}`)
+				fetch(`/api/reports/error-rates${qs}`, { signal: controller.signal }),
+				fetch(`/api/reports/large-payloads${qs}`, { signal: controller.signal })
 			]);
 			if (!errRes.ok) {
 				const d = await errRes.json().catch(() => ({}));
@@ -161,10 +203,14 @@
 			data = await errRes.json();
 			payloads = await payRes.json();
 		} catch (e) {
+			if (isAbortError(e)) return;
 			error = e instanceof Error ? e.message : 'Failed to fetch report';
 		} finally {
-			loading = false;
-			payloadsLoading = false;
+			if (reportController === controller) {
+				reportController = null;
+				loading = false;
+				payloadsLoading = false;
+			}
 		}
 	}
 
@@ -233,6 +279,12 @@
 	}
 
 	onMount(fetchReport);
+	onDestroy(() => {
+		destroyed = true;
+		aiController?.abort();
+		reportController?.abort();
+		if (aiRenderTimer !== null) clearTimeout(aiRenderTimer);
+	});
 </script>
 
 <div class="page-shell" data-od-id="reports-page">

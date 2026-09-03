@@ -825,11 +825,18 @@ pub fn analytics_generation(db: &Database) -> u64 {
     .unwrap_or(0)
 }
 
-pub fn load_entries_since(db: &Database, since: Option<f64>) -> Result<Vec<LogEntry>, String> {
-    (|| -> Result<Vec<_>, Box<dyn std::error::Error>> {
+/// Visit log entries without materializing the full selected range in memory.
+///
+/// Entries are yielded in timestamp order when `since` is provided and storage
+/// order otherwise. This keeps a large log history from becoming a
+/// request-sized allocation spike.
+pub fn visit_logs_since<F>(db: &Database, since: Option<f64>, mut visitor: F) -> Result<(), String>
+where
+    F: FnMut(&LogEntry),
+{
+    (|| -> Result<(), Box<dyn std::error::Error>> {
         let rtxn = db.begin_read()?;
         let logs = rtxn.open_table(LOGS)?;
-        let mut entries = Vec::new();
         if let Some(start) = since {
             let times = rtxn.open_table(LOG_TIMES)?;
             for result in times.range((timestamp_millis(start), 0)..)? {
@@ -837,30 +844,26 @@ pub fn load_entries_since(db: &Database, since: Option<f64>) -> Result<Vec<LogEn
                 let (_, id) = key.value();
                 let Some(value) = logs.get(id)? else { continue };
                 match serde_json::from_str::<LogEntry>(value.value()) {
-                    Ok(entry) if entry.ts >= start => entries.push(entry),
+                    Ok(entry) if entry.ts >= start => visitor(&entry),
                     Ok(_) => {}
-                    Err(error) => log::error!("load_entries_since: deserialize row: {error}"),
+                    Err(error) => log::error!("visit_logs_since: deserialize row: {error}"),
                 }
             }
         } else {
             for result in logs.iter()? {
                 let (_, value) = result?;
-                match serde_json::from_str(value.value()) {
-                    Ok(entry) => entries.push(entry),
-                    Err(error) => log::error!("load_entries_since: deserialize row: {error}"),
+                match serde_json::from_str::<LogEntry>(value.value()) {
+                    Ok(entry) => visitor(&entry),
+                    Err(error) => log::error!("visit_logs_since: deserialize row: {error}"),
                 }
             }
         }
-        Ok(entries)
+        Ok(())
     })()
-    .map_err(|e| {
-        log::error!("load_entries_since: {e}");
+    .map_err(|error| {
+        log::error!("visit_logs_since: {error}");
         "Database error".to_string()
     })
-}
-
-pub fn load_entries(db: &Database) -> Result<Vec<LogEntry>, String> {
-    load_entries_since(db, None)
 }
 
 fn merge_rollup_value(
@@ -1152,6 +1155,10 @@ mod tests {
         let aggregate = aggregate_range(&db, Some(1_000.0), 1_200.0).unwrap();
         assert_eq!(aggregate.total, 3);
         assert_eq!(aggregate.status_codes.get(&404), Some(&1));
+
+        let mut visited = Vec::new();
+        visit_logs_since(&db, Some(1_060.0), |entry| visited.push(entry.status)).unwrap();
+        assert_eq!(visited, vec![404, 500]);
 
         let first = scan_logs_page(&db, LogScan::All, None, 0, 2, true, |_| true).unwrap();
         assert_eq!(first.entries.len(), 2);
