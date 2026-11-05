@@ -6,7 +6,7 @@
 # Vite is only tested against Node upstream, so this is the supported
 # combination rather than a workaround. `bun run build` is unaffected — a build
 # proxies nothing — which is why the production Dockerfile can stay on Bun.
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 
 ARG DEV_UID=1000
 ARG DEV_GID=1000
